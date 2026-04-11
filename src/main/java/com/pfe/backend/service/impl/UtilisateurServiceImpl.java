@@ -7,7 +7,7 @@ import com.pfe.backend.entity.enums.Role;
 import com.pfe.backend.repository.UtilisateurRepository;
 import com.pfe.backend.service.UtilisateurService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 public class UtilisateurServiceImpl implements UtilisateurService {
 
     private final UtilisateurRepository utilisateurRepository;
-    private final BCryptPasswordEncoder passwordEncoder;
+    private final PasswordEncoder passwordEncoder;
 
     @Override
     public RegisterResponseDTO registerCitizen(RegisterRequestDTO request) {
