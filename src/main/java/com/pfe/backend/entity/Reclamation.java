@@ -1,5 +1,6 @@
 package com.pfe.backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.pfe.backend.entity.enums.Priorite;
 import com.pfe.backend.entity.enums.StatutReclamation;
 import jakarta.persistence.*;
@@ -9,6 +10,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Getter
@@ -46,4 +48,7 @@ public class Reclamation {
 
     @ManyToOne
     private CategorieReclamation categorie;
+    @JsonIgnoreProperties("reclamation")
+    @OneToMany(mappedBy = "reclamation", cascade = CascadeType.ALL)
+    private List<Media> medias;
 }
