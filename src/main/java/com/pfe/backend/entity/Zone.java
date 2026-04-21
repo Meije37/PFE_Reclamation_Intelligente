@@ -9,16 +9,22 @@ import lombok.Setter;
 import java.util.List;
 
 @Entity
+@Table(name = "zones")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 public class Zone {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long idZone;
-    private String nomZone;
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String nom;
+
     private String typeZone;
+
     private String description;
 
     @OneToMany(mappedBy = "zone")

@@ -20,10 +20,11 @@ public class CustomUserDetailsService implements UserDetailsService {
         Utilisateur utilisateur = utilisateurRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("Utilisateur introuvable"));
 
-        return new User(
-                utilisateur.getEmail(),
-                utilisateur.getMotDePasse(),
-                List.of(new SimpleGrantedAuthority("ROLE_" + utilisateur.getRole().name()))
-        );
+        return User.builder()
+                .username(utilisateur.getEmail())
+                .password(utilisateur.getMotDePasse())
+                .authorities(List.of(new SimpleGrantedAuthority("ROLE_" + utilisateur.getRole().name())))
+                .disabled(Boolean.FALSE.equals(utilisateur.getActif()) || utilisateur.getActif() == null)
+                .build();
     }
 }

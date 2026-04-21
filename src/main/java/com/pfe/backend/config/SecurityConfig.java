@@ -2,7 +2,8 @@ package com.pfe.backend.config;
 
 import com.pfe.backend.service.CustomUserDetailsService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -10,9 +11,10 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.web.*;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -29,6 +31,11 @@ public class SecurityConfig {
     private final CustomUserDetailsService customUserDetailsService;
 
     @Bean
+    public UserDetailsService userDetailsService() {
+        return customUserDetailsService;
+    }
+
+    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
                 // 1. On active le CORS avec la config définie plus bas
@@ -37,11 +44,15 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+
+                        .anyRequest().authenticated()
+
                         .requestMatchers("/api/reclamations/assigner/**", "/api/reclamations/statut/**").hasAnyRole("ADMIN", "AGENT")
 //                        .requestMatchers("/api/reclamations/creer").hasRole("CITOYEN")
                                 // Dans SecurityConfig.java
                                 .requestMatchers("/api/citoyen/**").hasAnyRole("CITOYEN", "ADMIN")
                                 .anyRequest().authenticated()
+
                 )
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -51,6 +62,12 @@ public class SecurityConfig {
 
         return http.build();
     }
+
+
+    @Bean
+    public AuthenticationProvider authenticationProvider() {
+       DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService());
+provider.setPasswordEncoder(passwordEncoder());
 
 
     @Bean
@@ -71,6 +88,7 @@ public class SecurityConfig {
     public AuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider(customUserDetailsService);
         provider.setPasswordEncoder(passwordEncoder());
+
         return provider;
     }
 
