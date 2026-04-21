@@ -3,6 +3,7 @@ package com.pfe.backend.entity;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.pfe.backend.entity.enums.Role;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Pattern;
 import lombok.*;
 
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+
 public class Utilisateur {
 
     @Id
@@ -28,17 +30,19 @@ public class Utilisateur {
 
     @Column(nullable = false, unique = true)
     private String email;
-
+    @JsonIgnore
     @Column(nullable = false)
     private String motDePasse;
 
     @Column(nullable = false, unique = true)
+    @Pattern(regexp = "^[234]\\d{7}$", message = "Format de téléphone mauritanien invalide")
     private String telephone;
-
+    @Builder.Default
     private Boolean actif = true;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @Builder.Default
     private Role role = Role.CITOYEN;
 
     @JsonIgnore
