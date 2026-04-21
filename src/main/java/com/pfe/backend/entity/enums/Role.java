@@ -1,3 +1,7 @@
 package com.pfe.backend.entity.enums;
 
-public enum Role { CITIZEN, AGENT, ADMIN }
+public enum Role {
+    CITOYEN,
+    AGENT,
+    ADMIN
+}

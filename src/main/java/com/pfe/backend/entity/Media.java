@@ -1,5 +1,6 @@
 package com.pfe.backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.pfe.backend.entity.enums.TypeMedia;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -30,6 +31,7 @@ public class Media {
 
     @ManyToOne
     @JoinColumn(name = "reclamation_id")
+    @JsonIgnoreProperties("medias")
     private Reclamation reclamation;
 
     @OneToMany(mappedBy = "media", cascade = CascadeType.ALL)

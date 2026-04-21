@@ -1,4 +1,4 @@
-package com.pfe.backend.tdo;
+package com.pfe.backend.dto;
 
 import lombok.Data;
 
