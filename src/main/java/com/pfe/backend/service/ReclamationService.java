@@ -1,8 +1,11 @@
 package com.pfe.backend.service;
 
+import com.pfe.backend.dto.ChangerStatutRequestDTO;
 import com.pfe.backend.dto.ReclamationRequestDTO;
 import com.pfe.backend.entity.*;
+import com.pfe.backend.entity.enums.ModeAffectation;
 import com.pfe.backend.entity.enums.Priorite;
+import com.pfe.backend.entity.enums.Role;
 import com.pfe.backend.entity.enums.StatutReclamation;
 import com.pfe.backend.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -12,10 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +27,8 @@ public class ReclamationService {
     private final UtilisateurRepository utilisateurRepository;
     private final LocalisationRepository localisationRepository;
     private final RestTemplate restTemplate;
+    private final AffectationRepository affectationRepository;
+    private final HistoriqueStatutRepository historiqueRepository;
 
     @Transactional
     public Reclamation creerReclamation(ReclamationRequestDTO dto, String emailCitoyen) {
@@ -79,6 +82,10 @@ public class ReclamationService {
         return reclamationRepository.findByCitoyenId(user.getId());
     }
 
+    public List<Reclamation> getAllReclamations() {
+        return reclamationRepository.findAll();
+    }
+
     public Map<String, Long> getStatsCitoyen(String email) {
         Utilisateur user = utilisateurRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
@@ -87,11 +94,13 @@ public class ReclamationService {
 
         return Map.of(
                 "total", (long) mesRecs.size(),
+                "ouvertes", mesRecs.stream().filter(r -> r.getStatut() == StatutReclamation.OUVERTE).count(),
                 "enCours", mesRecs.stream().filter(r -> r.getStatut() == StatutReclamation.EN_COURS).count(),
-                "resolues", mesRecs.stream().filter(r -> r.getStatut() == StatutReclamation.RESOLUE).count()
+                "resolues", mesRecs.stream().filter(r -> r.getStatut() == StatutReclamation.RESOLUE).count(),
+                "rejetees", mesRecs.stream().filter(r -> r.getStatut() == StatutReclamation.REJETEE).count()
         );
     }
-//
+
 
     // --- Fonctions privées de logique "IA" ---
 
@@ -142,7 +151,7 @@ public class ReclamationService {
         }
         return rec;
     }
-    @Transactional // IMPORTANT : Assure que toute l'opération est une seule transaction
+    @Transactional
     public void annulerReclamation(Long id, String email) {
         // 1. On cherche la réclamation
         Reclamation rec = reclamationRepository.findById(id)
@@ -161,10 +170,110 @@ public class ReclamationService {
         // 4. Mise à jour simple
         rec.setStatut(StatutReclamation.ANNULEE);
 
-
-        // Pas besoin de appeler save() explicitement si c'est @Transactional,
-        // mais tu peux le laisser pour être sûr.
         reclamationRepository.save(rec);
         System.out.println("Annulation pour : " + id);
+
+
     }
+
+
+
+@Transactional
+public Affectation assignerAgent(Long reclamationId, Long agentId) {
+
+    Reclamation reclamation = reclamationRepository.findById(reclamationId)
+            .orElseThrow(() -> new RuntimeException("Réclamation introuvable avec l'id : " + reclamationId));
+
+    Utilisateur agent = utilisateurRepository.findById(agentId)
+            .orElseThrow(() -> new RuntimeException("Utilisateur introuvable avec l'id : " + agentId));
+
+    if (agent.getRole() != Role.AGENT) {
+        throw new RuntimeException(
+                "L'utilisateur id=" + agentId + " n'est pas un AGENT. " +
+                        "Seuls les utilisateurs avec le rôle AGENT peuvent être assignés."
+        );
+    }
+
+    // Créer l'affectation
+    Affectation affectation = new Affectation();
+    affectation.setReclamation(reclamation);
+    affectation.setAgent(agent);
+    affectation.setModeAffectation(ModeAffectation.MANUELLE);
+    affectation.setDateAffectation(LocalDateTime.now());
+    affectation.setCommentaire("Affectation manuelle par l'administrateur");
+
+    // Passer EN_COURS automatiquement si encore OUVERTE
+    if (reclamation.getStatut() == StatutReclamation.OUVERTE) {
+        StatutReclamation ancienStatut = reclamation.getStatut();
+        reclamation.setStatut(StatutReclamation.EN_COURS);
+        reclamationRepository.save(reclamation);
+
+        HistoriqueStatut historique = new HistoriqueStatut();
+        historique.setReclamation(reclamation);
+        historique.setAncienStatut(ancienStatut);
+        historique.setNouveauStatut(StatutReclamation.EN_COURS);
+        historique.setDateChangement(LocalDateTime.now());
+        historique.setCommentaire("Statut mis à jour automatiquement lors de l'affectation à l'agent : "
+                + agent.getPrenom() + " " + agent.getNom());
+        historiqueRepository.save(historique);
+    }
+
+    return affectationRepository.save(affectation);
+
+}
+
+
+    @Transactional
+    public Reclamation changerStatut(Long reclamationId, ChangerStatutRequestDTO dto) {
+
+        Reclamation reclamation = reclamationRepository.findById(reclamationId)
+                .orElseThrow(() -> new RuntimeException("Réclamation introuvable avec l'id : " + reclamationId));
+
+        StatutReclamation nouveauStatut;
+        try {
+            nouveauStatut = StatutReclamation.valueOf(dto.getStatut().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException(
+                    "Statut invalide : '" + dto.getStatut() + "'. " +
+                            "Valeurs acceptées : OUVERTE, EN_COURS, RESOLUE, REJETEE, FERMEE, ANNULEE"
+            );
+        }
+
+        StatutReclamation ancienStatut = reclamation.getStatut();
+
+        // Sauvegarder dans l'historique
+        HistoriqueStatut historique = new HistoriqueStatut();
+        historique.setReclamation(reclamation);
+        historique.setAncienStatut(ancienStatut);
+        historique.setNouveauStatut(nouveauStatut);
+        historique.setDateChangement(LocalDateTime.now());
+        historique.setCommentaire(dto.getCommentaire());
+        historiqueRepository.save(historique);
+
+        // Mettre à jour la réclamation
+        reclamation.setStatut(nouveauStatut);
+        return reclamationRepository.save(reclamation);
+    }
+    // Appelée par : GET /api/admin/reclamations/par-statut?statut=EN_COURS
+// Nécessite dans ReclamationRepository : List<Reclamation> findByStatut(StatutReclamation statut);
+    public List<Reclamation> getReclamationsParStatut(StatutReclamation statut) {
+        return reclamationRepository.findByStatut(statut);
+    }
+
+    // Appelée par : GET /api/admin/reclamations/par-priorite?priorite=CRITIQUE
+// Nécessite dans ReclamationRepository : List<Reclamation> findByPriorite(Priorite priorite);
+    public List<Reclamation> getReclamationsParPriorite(Priorite priorite) {
+        return reclamationRepository.findByPriorite(priorite);
+    }
+
+    // Appelée par : GET /api/admin/reclamations/urgentes — fonctionnalité IA
+// Trie en mémoire par scoreUrgence décroissant, aucune query JPA nécessaire
+    public List<Reclamation> getReclamationsUrgentes() {
+        return reclamationRepository.findAll()
+                .stream()
+                .filter(r -> r.getScoreUrgence() != null)
+                .sorted(Comparator.comparingDouble(Reclamation::getScoreUrgence).reversed())
+                .collect(Collectors.toList());
+    }
+
 }

@@ -3,12 +3,13 @@ package com.pfe.backend.service;
 import com.pfe.backend.entity.Utilisateur;
 import com.pfe.backend.repository.UtilisateurRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.*;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-
+@Setter
 @Service
 @RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {

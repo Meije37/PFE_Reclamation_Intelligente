@@ -46,6 +46,6 @@ public class Utilisateur {
     private Role role = Role.CITOYEN;
 
     @JsonIgnore
-    @OneToMany(mappedBy = "citoyen")
+    @OneToMany(mappedBy = "citoyen", fetch = FetchType.LAZY)
     private List<Reclamation> reclamations;
 }

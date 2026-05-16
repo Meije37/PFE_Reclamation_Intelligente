@@ -21,9 +21,12 @@ public class JwtService {
         return Keys.hmacShaKeyFor(secretKey.getBytes());
     }
 
-    public String generateToken(String email) {
+    // On ajoute "String role" ici pour que la méthode puisse l'utiliser
+    public String generateToken(String email, String role) {
         return Jwts.builder()
                 .setSubject(email)
+                // Maintenant "role" fait référence au paramètre ci-dessus
+                .claim("role", role)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + jwtExpiration))
                 .signWith(getSigningKey(), SignatureAlgorithm.HS256)

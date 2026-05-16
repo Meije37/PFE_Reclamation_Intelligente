@@ -38,21 +38,16 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                // 1. On active le CORS avec la config définie plus bas
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/api/public/**").permitAll()
+                        .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
-
-                        .anyRequest().authenticated()
-
+                        .requestMatchers("/api/citoyen/**").hasAnyRole("CITOYEN", "ADMIN")
                         .requestMatchers("/api/reclamations/assigner/**", "/api/reclamations/statut/**").hasAnyRole("ADMIN", "AGENT")
-//                        .requestMatchers("/api/reclamations/creer").hasRole("CITOYEN")
-                                // Dans SecurityConfig.java
-                                .requestMatchers("/api/citoyen/**").hasAnyRole("CITOYEN", "ADMIN")
-                                .anyRequest().authenticated()
-
+                        .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -63,17 +58,9 @@ public class SecurityConfig {
         return http.build();
     }
 
-
-    @Bean
-    public AuthenticationProvider authenticationProvider() {
-       DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService());
-provider.setPasswordEncoder(passwordEncoder());
-
-
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Autorise Angular (port 4200)
         configuration.setAllowedOrigins(Arrays.asList("http://localhost:4200"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept"));
@@ -86,10 +73,13 @@ provider.setPasswordEncoder(passwordEncoder());
 
     @Bean
     public AuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(customUserDetailsService);
-        provider.setPasswordEncoder(passwordEncoder());
+        // Ta version impose de donner le service dès la création (le constructeur)
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider(userDetailsService());
 
-        return provider;
+        // On ajoute ensuite l'encodeur de mot de passe
+        authProvider.setPasswordEncoder(passwordEncoder());
+
+        return authProvider;
     }
 
     @Bean

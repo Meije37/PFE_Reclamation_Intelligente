@@ -24,6 +24,7 @@ public class ZoneServiceImpl implements ZoneService {
 
         Zone zone = new Zone();
         zone.setNom(request.getNom());
+        zone.setTypeZone(request.getTypeZone());
         zone.setDescription(request.getDescription());
 
         Zone savedZone = zoneRepository.save(zone);
@@ -42,6 +43,7 @@ public class ZoneServiceImpl implements ZoneService {
         }
 
         zone.setNom(request.getNom());
+        zone.setTypeZone(request.getTypeZone());
         zone.setDescription(request.getDescription());
 
         Zone updatedZone = zoneRepository.save(zone);
@@ -77,6 +79,7 @@ public class ZoneServiceImpl implements ZoneService {
         return new ZoneResponseDTO(
                 zone.getId(),
                 zone.getNom(),
+                zone.getTypeZone(),
                 zone.getDescription()
         );
     }

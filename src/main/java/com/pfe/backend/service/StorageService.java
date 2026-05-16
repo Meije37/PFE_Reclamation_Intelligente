@@ -13,7 +13,7 @@ import java.util.UUID;
 public class StorageService {
 
     @Value("${upload.path}")
-    private String uploadPath; // Récupère le chemin depuis application.properties
+    private String uploadPath;
 
     public String store(MultipartFile file) throws IOException {
         Path root = Paths.get(uploadPath); // Utilise le chemin absolu (C:/...)

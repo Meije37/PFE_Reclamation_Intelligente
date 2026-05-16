@@ -11,5 +11,6 @@ public class ZoneResponseDTO {
 
     private Long id;
     private String nom;
+    private String typeZone;
     private String description;
 }

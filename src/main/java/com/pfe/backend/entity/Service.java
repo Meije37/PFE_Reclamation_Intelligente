@@ -31,8 +31,7 @@ public class Service {
 
     @Column(nullable = false)
     private Boolean actif = true;
-
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "zone_id", nullable = false)
     private Zone zone;
 

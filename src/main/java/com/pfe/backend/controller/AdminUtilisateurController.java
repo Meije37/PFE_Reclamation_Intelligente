@@ -14,7 +14,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/admin/utilisateurs")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*") // 🔥 pour Angular plus tard
+@CrossOrigin(origins = "*") //
 public class AdminUtilisateurController {
 
     private final UtilisateurService utilisateurService;
@@ -33,7 +33,7 @@ public class AdminUtilisateurController {
         return ResponseEntity.ok(utilisateurs);
     }
 
-    // ✅ READ BY ID
+    //  READ BY ID
     @GetMapping("/{id}")
     public ResponseEntity<UtilisateurResponseDTO> getUtilisateurById(@PathVariable Long id) {
         UtilisateurResponseDTO utilisateur = utilisateurService.getUtilisateurById(id);

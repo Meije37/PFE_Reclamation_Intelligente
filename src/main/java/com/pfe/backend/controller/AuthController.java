@@ -26,6 +26,7 @@ public class AuthController {
     private final JwtService jwtService;
     private final UtilisateurRepository utilisateurRepository;
 
+
     @PostMapping("/register")
     public ResponseEntity<RegisterResponseDTO> registerCitizen(
             @Valid @RequestBody RegisterRequestDTO request) {
@@ -33,7 +34,6 @@ public class AuthController {
         RegisterResponseDTO response = utilisateurService.registerCitizen(request);
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
-
     @PostMapping("/login")
     public ResponseEntity<LoginResponseDTO> login(@RequestBody LoginRequestDTO request) {
 
@@ -47,7 +47,9 @@ public class AuthController {
         Utilisateur utilisateur = utilisateurRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new RuntimeException("Utilisateur introuvable"));
 
-        String token = jwtService.generateToken(utilisateur.getEmail());
+        // ✅ CORRECTION : On passe maintenant l'email ET le rôle pour le JWT
+        String token = jwtService.generateToken(utilisateur.getEmail(), utilisateur.getRole().name());
+
 
         LoginResponseDTO response = new LoginResponseDTO(
                 token,
