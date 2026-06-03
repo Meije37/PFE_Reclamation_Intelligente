@@ -29,7 +29,7 @@ public class ReclamationService {
     private final RestTemplate restTemplate;
     private final AffectationRepository affectationRepository;
     private final HistoriqueStatutRepository historiqueRepository;
-
+    private final ServiceRepository serviceRepository;
     @Transactional
     public Reclamation creerReclamation(ReclamationRequestDTO dto, String emailCitoyen) {
         // Validation Citoyen
@@ -72,7 +72,11 @@ public class ReclamationService {
         // Détection de doublon (simulée)
         rec.setEstDoublon(false);
 
-        return reclamationRepository.save(rec);
+        Reclamation savedRec = reclamationRepository.save(rec);
+
+        assignerAutomatiquement(savedRec, categorie);
+
+        return savedRec;
     }
 
     // Méthodes pour le Dashboard Citoyen
@@ -274,6 +278,81 @@ public Affectation assignerAgent(Long reclamationId, Long agentId) {
                 .filter(r -> r.getScoreUrgence() != null)
                 .sorted(Comparator.comparingDouble(Reclamation::getScoreUrgence).reversed())
                 .collect(Collectors.toList());
+    }
+    @Transactional
+    private void assignerAutomatiquement(Reclamation reclamation,
+                                         CategorieReclamation categorie) {
+        try {
+            // Utiliser le nom complet pour éviter le conflit avec @Service Spring
+            com.pfe.backend.entity.Service service = categorie.getServiceResponsable();
+
+            if (service == null) {
+                System.out.println("[AUTO-ASSIGN] Aucun service responsable " +
+                        "pour la catégorie : " + categorie.getNom());
+                return;
+            }
+
+            if (!service.getActif()) {
+                System.out.println("[AUTO-ASSIGN] Service inactif : " + service.getNom());
+                return;
+            }
+
+            List<Utilisateur> agents = utilisateurRepository
+                    .findByServiceIdAndRoleAndActifTrue(service.getId(), Role.AGENT);
+
+            if (agents.isEmpty()) {
+                System.out.println("[AUTO-ASSIGN] Aucun agent disponible " +
+                        "dans le service : " + service.getNom());
+                return;
+            }
+
+            Utilisateur agentMoinsCharge = agents.stream()
+                    .min(Comparator.comparingLong(agent ->
+                            reclamationRepository.countAffectationsParStatut(
+                                    agent.getId(),
+                                    StatutReclamation.EN_COURS
+                            )
+                    ))
+                    .orElse(null);
+
+            if (agentMoinsCharge == null) return;
+
+            Affectation affectation = new Affectation();
+            affectation.setReclamation(reclamation);
+            affectation.setAgent(agentMoinsCharge);
+            affectation.setModeAffectation(ModeAffectation.AUTOMATIQUE);
+            affectation.setDateAffectation(LocalDateTime.now());
+            affectation.setCommentaire(
+                    "Assignation automatique — Service : " + service.getNom() +
+                            " — Agent : " + agentMoinsCharge.getPrenom() +
+                            " " + agentMoinsCharge.getNom()
+            );
+            affectationRepository.save(affectation);
+
+            StatutReclamation ancienStatut = reclamation.getStatut();
+            reclamation.setStatut(StatutReclamation.EN_COURS);
+            reclamationRepository.save(reclamation);
+
+            HistoriqueStatut historique = new HistoriqueStatut();
+            historique.setReclamation(reclamation);
+            historique.setAncienStatut(ancienStatut);
+            historique.setNouveauStatut(StatutReclamation.EN_COURS);
+            historique.setDateChangement(LocalDateTime.now());
+            historique.setCommentaire(
+                    "Assignation automatique à l'agent " +
+                            agentMoinsCharge.getPrenom() + " " + agentMoinsCharge.getNom() +
+                            " (Service : " + service.getNom() + ")"
+            );
+            historiqueRepository.save(historique);
+
+            System.out.println("[AUTO-ASSIGN] ✅ Réclamation " +
+                    reclamation.getReference() + " assignée à " +
+                    agentMoinsCharge.getPrenom() + " " + agentMoinsCharge.getNom());
+
+        } catch (Exception e) {
+            System.err.println("[AUTO-ASSIGN] ❌" +
+                    " Erreur : " + e.getMessage());
+        }
     }
 
 }

@@ -107,4 +107,8 @@ public class ServiceServiceImpl implements ServiceService {
                 service.getZone().getNom()
         );
     }
+    @Override
+    public boolean existsById(Long id) {
+        return serviceRepository.existsById(id);
+    }
 }

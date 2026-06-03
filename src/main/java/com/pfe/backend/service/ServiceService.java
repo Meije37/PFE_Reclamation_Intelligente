@@ -16,4 +16,5 @@ public interface ServiceService {
     ServiceResponseDTO getServiceById(Long id);
 
     void deleteService(Long id);
+    boolean existsById(Long id);
 }

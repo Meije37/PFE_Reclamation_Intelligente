@@ -1,5 +1,7 @@
 package com.pfe.backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -33,8 +35,10 @@ public class Service {
     private Boolean actif = true;
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "zone_id", nullable = false)
+    @JsonIgnoreProperties("services")
     private Zone zone;
 
     @OneToMany(mappedBy = "service")
+    @JsonIgnore
     private List<Intervention> interventions;
 }

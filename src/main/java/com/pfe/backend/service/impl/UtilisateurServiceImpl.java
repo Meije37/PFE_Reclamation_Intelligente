@@ -166,6 +166,10 @@ public class UtilisateurServiceImpl implements UtilisateurService {
                 .telephone(utilisateur.getTelephone())
                 .actif(utilisateur.getActif())
                 .role(utilisateur.getRole())
+                .serviceId(utilisateur.getService() != null
+                        ? utilisateur.getService().getId() : null)
+                .serviceNom(utilisateur.getService() != null
+                        ? utilisateur.getService().getNom() : null)
                 .build();
     }
 }

@@ -1,5 +1,6 @@
 package com.pfe.backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -26,7 +27,7 @@ public class Zone {
     private String typeZone;
 
     private String description;
-
+    @JsonIgnore
     @OneToMany(mappedBy = "zone")
     private List<Service> services;
 }

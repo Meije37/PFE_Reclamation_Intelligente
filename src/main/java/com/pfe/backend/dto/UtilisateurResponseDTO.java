@@ -20,4 +20,6 @@ public class UtilisateurResponseDTO {
     private String telephone;
     private Boolean actif;
     private Role role;
+    private Long   serviceId;
+    private String serviceNom;
 }

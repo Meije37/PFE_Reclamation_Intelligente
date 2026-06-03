@@ -1,10 +1,12 @@
 package com.pfe.backend.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.pfe.backend.entity.enums.Role;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Pattern;
 import lombok.*;
+import com.pfe.backend.entity.Service;
 
 import java.util.List;
 
@@ -48,4 +50,11 @@ public class Utilisateur {
     @JsonIgnore
     @OneToMany(mappedBy = "citoyen", fetch = FetchType.LAZY)
     private List<Reclamation> reclamations;
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "service_id", nullable = true)
+    @JsonIgnoreProperties({"services", "interventions"})
+    private Service service;
+    @JsonIgnore
+    @OneToMany(mappedBy = "agent")
+    private List<Affectation> affectations;
 }

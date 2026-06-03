@@ -20,6 +20,15 @@ public interface ReclamationRepository extends JpaRepository<Reclamation, Long> 
 
     // Tu peux aussi ajouter celle-ci pour le total
     long countByCitoyenId(Long id);
+    @Query("""
+        SELECT COUNT(a) FROM Affectation a
+        WHERE a.agent.id = :agentId
+        AND a.reclamation.statut = :statut
+    """)
+    Long countAffectationsParStatut(
+            @Param("agentId") Long agentId,
+            @Param("statut") StatutReclamation statut
+    );
 
 
 }

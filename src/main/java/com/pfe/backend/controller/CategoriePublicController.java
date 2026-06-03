@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 // ============================================================
 //  PRIORITE #1 — Catégories publiques
@@ -47,9 +48,25 @@ public class CategoriePublicController {
      * Retourne toutes les catégories disponibles.
      * Accessible sans authentification (formulaire de création).
      */
+//    @GetMapping("/categories")
+//    public ResponseEntity<List<CategorieReclamation>> getAllCategories() {
+//        List<CategorieReclamation> categories = categorieRepository.findAll();
+//        return ResponseEntity.ok(categories);
+//    }
+
     @GetMapping("/categories")
-    public ResponseEntity<List<CategorieReclamation>> getAllCategories() {
-        List<CategorieReclamation> categories = categorieRepository.findAll();
+    public ResponseEntity<List<Map<String, Object>>> getAllCategories() {
+        List<Map<String, Object>> categories = categorieRepository.findAll()
+                .stream()
+                .map(c -> {
+                    Map<String, Object> dto = new java.util.LinkedHashMap<>();
+                    dto.put("idCategorie",       c.getIdCategorie());
+                    dto.put("nom",               c.getNom());
+                    dto.put("description",       c.getDescription());
+                    dto.put("prioriteParDefaut", c.getPrioriteParDefaut());
+                    return dto;
+                })
+                .toList();
         return ResponseEntity.ok(categories);
     }
 }

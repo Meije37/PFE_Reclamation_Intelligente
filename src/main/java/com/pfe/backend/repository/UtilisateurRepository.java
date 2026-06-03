@@ -1,9 +1,11 @@
 package com.pfe.backend.repository;
 
 import com.pfe.backend.entity.Utilisateur;
+import com.pfe.backend.entity.enums.Role;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -18,4 +20,9 @@ public interface UtilisateurRepository extends JpaRepository<Utilisateur, Long> 
     boolean existsByEmailAndIdNot(String email, Long id);
 
     boolean existsByTelephoneAndIdNot(String telephone, Long id);
+    List<Utilisateur> findByServiceIdAndRoleAndActifTrue(
+            Long serviceId,
+            Role role
+    );
+
 }
