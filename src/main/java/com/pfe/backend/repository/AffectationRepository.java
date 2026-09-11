@@ -14,4 +14,8 @@ public interface AffectationRepository extends JpaRepository<Affectation, Long> 
 
     // Affectations d'un agent pour une réclamation précise
     List<Affectation> findByAgentIdAndReclamationId(Long agentId, Long reclamationId);
+
+    // Toutes les affectations d'une réclamation (généralement une seule active,
+    // mais on garde l'historique) — utile pour retrouver l'agent assigné
+    List<Affectation> findByReclamationIdOrderByDateAffectationDesc(Long reclamationId);
 }

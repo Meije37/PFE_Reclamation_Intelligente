@@ -9,4 +9,5 @@ import java.util.Optional;
 @Repository
 public interface OTPVerificationRepository extends JpaRepository<OTPVerification, Long> {
     Optional<OTPVerification> findByCibleAndCode(String cible, String code);
+    void deleteByCible(String cible);
 }

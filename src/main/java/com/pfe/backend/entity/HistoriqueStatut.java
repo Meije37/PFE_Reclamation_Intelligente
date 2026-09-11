@@ -1,5 +1,6 @@
 package com.pfe.backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.pfe.backend.entity.enums.StatutReclamation;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -25,6 +26,10 @@ public class HistoriqueStatut {
     private LocalDateTime dateChangement = LocalDateTime.now();
     private String commentaire;
 
-    @ManyToOne
-    private Reclamation reclamation;
+//    @ManyToOne
+//    private Reclamation reclamation;
+// Dans HistoriqueStatut.java — évite la récursion infinie
+@ManyToOne
+@JsonIgnoreProperties({"historiqueStatuts", "medias", "affectations", "citoyen"})
+private Reclamation reclamation;
 }

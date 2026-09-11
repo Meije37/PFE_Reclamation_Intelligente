@@ -31,4 +31,13 @@ public class Intervention {
 
     @ManyToOne
     private Service service;
+
+    // L'agent qui a effectué (ou va effectuer) l'intervention terrain.
+    // Distinct de Affectation.agent : une affectation dit "qui est responsable
+    // du dossier", une intervention documente "ce qui a été fait, quand, et
+    // combien ça a coûté" — plusieurs interventions peuvent suivre une même
+    // affectation (ex: un premier passage, puis un second pour finaliser).
+    @ManyToOne
+    @JoinColumn(name = "agent_id")
+    private Utilisateur agent;
 }

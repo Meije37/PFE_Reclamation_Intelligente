@@ -51,4 +51,12 @@ public class Reclamation {
     @JsonIgnoreProperties("reclamation")
     @OneToMany(mappedBy = "reclamation", cascade = CascadeType.ALL)
     private List<Media> medias;
+
+    // Champ non persisté : rempli à la volée par AdminReclamationController
+    // (via VoteRepository) juste avant de renvoyer la réponse JSON, pour que
+    // l'admin voie combien de citoyens soutiennent cette réclamation, sans
+    // stocker cette donnée redondante en base (elle est déjà dans la table
+    // Vote, ceci n'est qu'un raccourci d'affichage).
+    @Transient
+    private Long nombreVotes;
 }

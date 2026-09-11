@@ -11,6 +11,7 @@ import com.pfe.backend.entity.enums.StatutReclamation;
 import com.pfe.backend.repository.AffectationRepository;
 import com.pfe.backend.repository.HistoriqueStatutRepository;
 import com.pfe.backend.repository.UtilisateurRepository;
+import com.pfe.backend.repository.VoteRepository;
 import com.pfe.backend.service.ReclamationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -60,11 +61,43 @@ public class AdminReclamationController {
     private final HistoriqueStatutRepository historiqueRepository;
     private final UtilisateurRepository utilisateurRepository;
     private final AffectationRepository affectationRepository;
+    private final VoteRepository voteRepository;
+
+    // ── Remplissage du compteur de votes (lecture seule, purement informatif) ──
+    // Le champ Reclamation.nombreVotes n'est pas en base (voir @Transient) :
+    // on le remplit ici juste avant de renvoyer la réponse JSON à l'admin.
+    private void remplirNombreVotes(List<Reclamation> reclamations) {
+        List<Long> ids = reclamations.stream().map(Reclamation::getId).toList();
+        if (ids.isEmpty()) return;
+        Map<Long, Long> votesParReclamation = voteRepository.countByReclamationIds(ids).stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        row -> (Long) row[0], row -> (Long) row[1]));
+        reclamations.forEach(r ->
+                r.setNombreVotes(votesParReclamation.getOrDefault(r.getId(), 0L)));
+    }
+
+    // Variante fluide (retourne la liste reçue) pratique pour un retour direct
+    // en une ligne : return ResponseEntity.ok(withNombreVotes(liste));
+    private List<Reclamation> withNombreVotes(List<Reclamation> reclamations) {
+        remplirNombreVotes(reclamations);
+        return reclamations;
+    }
+
+    private void remplirNombreVotes(Reclamation reclamation) {
+        reclamation.setNombreVotes(voteRepository.countByReclamation_Id(reclamation.getId()));
+    }
+
+    private Reclamation withNombreVotes(Reclamation reclamation) {
+        remplirNombreVotes(reclamation);
+        return reclamation;
+    }
 
 
     @GetMapping
     public ResponseEntity<List<Reclamation>> getAll() {
-        return ResponseEntity.ok(reclamationService.getAllReclamations());
+        List<Reclamation> reclamations = reclamationService.getAllReclamations();
+        remplirNombreVotes(reclamations);
+        return ResponseEntity.ok(reclamations);
     }
 
 
@@ -79,9 +112,8 @@ public class AdminReclamationController {
                             "Valeurs : OUVERTE, EN_COURS, RESOLUE, REJETEE, FERMEE, ANNULEE"
             );
         }
-        return ResponseEntity.ok(reclamationService.getReclamationsParStatut(statutEnum));
+        return ResponseEntity.ok(withNombreVotes(reclamationService.getReclamationsParStatut(statutEnum)));
     }
-
     @GetMapping("/par-priorite")
     public ResponseEntity<List<Reclamation>> getParPriorite(@RequestParam String priorite) {
         Priorite prioriteEnum;
@@ -93,13 +125,13 @@ public class AdminReclamationController {
                             "Valeurs : BASSE, MOYENNE, HAUTE, CRITIQUE"
             );
         }
-        return ResponseEntity.ok(reclamationService.getReclamationsParPriorite(prioriteEnum));
+        return ResponseEntity.ok(withNombreVotes(reclamationService.getReclamationsParPriorite(prioriteEnum)));
     }
 
 
     @GetMapping("/urgentes")
     public ResponseEntity<List<Reclamation>> getUrgentes() {
-        return ResponseEntity.ok(reclamationService.getReclamationsUrgentes());
+        return ResponseEntity.ok(withNombreVotes(reclamationService.getReclamationsUrgentes()));
     }
 
 
@@ -135,11 +167,12 @@ public class AdminReclamationController {
 
     @GetMapping("/{id}")
     public ResponseEntity<Reclamation> getById(@PathVariable Long id) {
-        return ResponseEntity.ok(reclamationService.getAllReclamations()
+        Reclamation reclamation = reclamationService.getAllReclamations()
                 .stream()
                 .filter(r -> r.getId().equals(id))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("Réclamation introuvable")));
+                .orElseThrow(() -> new RuntimeException("Réclamation introuvable"));
+        return ResponseEntity.ok(withNombreVotes(reclamation));
     }
 
     // 🆕 NOUVEAU — Historique des statuts d'une réclamation

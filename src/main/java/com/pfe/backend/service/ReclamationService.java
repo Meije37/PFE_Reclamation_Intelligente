@@ -10,6 +10,8 @@ import com.pfe.backend.entity.enums.StatutReclamation;
 import com.pfe.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
@@ -30,6 +32,7 @@ public class ReclamationService {
     private final AffectationRepository affectationRepository;
     private final HistoriqueStatutRepository historiqueRepository;
     private final ServiceRepository serviceRepository;
+    private final NotificationService notificationService;
     @Transactional
     public Reclamation creerReclamation(ReclamationRequestDTO dto, String emailCitoyen) {
         // Validation Citoyen
@@ -74,9 +77,30 @@ public class ReclamationService {
 
         Reclamation savedRec = reclamationRepository.save(rec);
 
+        notifierAdminsNouvelleReclamation(savedRec);
+
         assignerAutomatiquement(savedRec, categorie);
 
         return savedRec;
+    }
+
+    /**
+     * Notifie tous les administrateurs actifs lors du dépôt d'une nouvelle
+     * réclamation — leur permet de réagir vite même sans consulter le
+     * dashboard en continu.
+     */
+    private void notifierAdminsNouvelleReclamation(Reclamation reclamation) {
+        List<Utilisateur> admins = utilisateurRepository.findByRole(Role.ADMIN);
+
+        for (Utilisateur admin : admins) {
+            notificationService.creer(
+                    admin,
+                    "Nouvelle réclamation déposée",
+                    "\"" + reclamation.getTitre() + "\" (réf. " + reclamation.getReference()
+                            + ") vient d'être déposée par un citoyen.",
+                    reclamation.getId()
+            );
+        }
     }
 
     // Méthodes pour le Dashboard Citoyen
@@ -84,6 +108,13 @@ public class ReclamationService {
         Utilisateur user = utilisateurRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
         return reclamationRepository.findByCitoyenId(user.getId());
+    }
+
+    /** Variante paginée utilisée par l'app mobile pour "Mes réclamations". */
+    public Page<Reclamation> getReclamationsParEmailPage(String email, Pageable pageable) {
+        Utilisateur user = utilisateurRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
+        return reclamationRepository.findByCitoyenIdOrderByDateCreationDesc(user.getId(), pageable);
     }
 
     public List<Reclamation> getAllReclamations() {
@@ -182,49 +213,59 @@ public class ReclamationService {
 
 
 
-@Transactional
-public Affectation assignerAgent(Long reclamationId, Long agentId) {
+    @Transactional
+    public Affectation assignerAgent(Long reclamationId, Long agentId) {
 
-    Reclamation reclamation = reclamationRepository.findById(reclamationId)
-            .orElseThrow(() -> new RuntimeException("Réclamation introuvable avec l'id : " + reclamationId));
+        Reclamation reclamation = reclamationRepository.findById(reclamationId)
+                .orElseThrow(() -> new RuntimeException("Réclamation introuvable avec l'id : " + reclamationId));
 
-    Utilisateur agent = utilisateurRepository.findById(agentId)
-            .orElseThrow(() -> new RuntimeException("Utilisateur introuvable avec l'id : " + agentId));
+        Utilisateur agent = utilisateurRepository.findById(agentId)
+                .orElseThrow(() -> new RuntimeException("Utilisateur introuvable avec l'id : " + agentId));
 
-    if (agent.getRole() != Role.AGENT) {
-        throw new RuntimeException(
-                "L'utilisateur id=" + agentId + " n'est pas un AGENT. " +
-                        "Seuls les utilisateurs avec le rôle AGENT peuvent être assignés."
+        if (agent.getRole() != Role.AGENT) {
+            throw new RuntimeException(
+                    "L'utilisateur id=" + agentId + " n'est pas un AGENT. " +
+                            "Seuls les utilisateurs avec le rôle AGENT peuvent être assignés."
+            );
+        }
+
+        // Créer l'affectation
+        Affectation affectation = new Affectation();
+        affectation.setReclamation(reclamation);
+        affectation.setAgent(agent);
+        affectation.setModeAffectation(ModeAffectation.MANUELLE);
+        affectation.setDateAffectation(LocalDateTime.now());
+        affectation.setCommentaire("Affectation manuelle par l'administrateur");
+
+        // Passer EN_COURS automatiquement si encore OUVERTE
+        if (reclamation.getStatut() == StatutReclamation.OUVERTE) {
+            StatutReclamation ancienStatut = reclamation.getStatut();
+            reclamation.setStatut(StatutReclamation.EN_COURS);
+            reclamationRepository.save(reclamation);
+
+            HistoriqueStatut historique = new HistoriqueStatut();
+            historique.setReclamation(reclamation);
+            historique.setAncienStatut(ancienStatut);
+            historique.setNouveauStatut(StatutReclamation.EN_COURS);
+            historique.setDateChangement(LocalDateTime.now());
+            historique.setCommentaire("Statut mis à jour automatiquement lors de l'affectation à l'agent : "
+                    + agent.getPrenom() + " " + agent.getNom());
+            historiqueRepository.save(historique);
+        }
+
+        Affectation affectationSauvee = affectationRepository.save(affectation);
+
+        notificationService.creer(
+                agent,
+                "Nouvelle réclamation assignée",
+                "La réclamation \"" + reclamation.getTitre() + "\" (réf. " + reclamation.getReference()
+                        + ") vous a été assignée.",
+                reclamation.getId()
         );
+
+        return affectationSauvee;
+
     }
-
-    // Créer l'affectation
-    Affectation affectation = new Affectation();
-    affectation.setReclamation(reclamation);
-    affectation.setAgent(agent);
-    affectation.setModeAffectation(ModeAffectation.MANUELLE);
-    affectation.setDateAffectation(LocalDateTime.now());
-    affectation.setCommentaire("Affectation manuelle par l'administrateur");
-
-    // Passer EN_COURS automatiquement si encore OUVERTE
-    if (reclamation.getStatut() == StatutReclamation.OUVERTE) {
-        StatutReclamation ancienStatut = reclamation.getStatut();
-        reclamation.setStatut(StatutReclamation.EN_COURS);
-        reclamationRepository.save(reclamation);
-
-        HistoriqueStatut historique = new HistoriqueStatut();
-        historique.setReclamation(reclamation);
-        historique.setAncienStatut(ancienStatut);
-        historique.setNouveauStatut(StatutReclamation.EN_COURS);
-        historique.setDateChangement(LocalDateTime.now());
-        historique.setCommentaire("Statut mis à jour automatiquement lors de l'affectation à l'agent : "
-                + agent.getPrenom() + " " + agent.getNom());
-        historiqueRepository.save(historique);
-    }
-
-    return affectationRepository.save(affectation);
-
-}
 
 
     @Transactional
@@ -256,7 +297,19 @@ public Affectation assignerAgent(Long reclamationId, Long agentId) {
 
         // Mettre à jour la réclamation
         reclamation.setStatut(nouveauStatut);
-        return reclamationRepository.save(reclamation);
+        Reclamation reclamationSauvee = reclamationRepository.save(reclamation);
+
+        if (reclamation.getCitoyen() != null) {
+            notificationService.creer(
+                    reclamation.getCitoyen(),
+                    "Mise à jour de votre réclamation",
+                    "Le statut de votre réclamation \"" + reclamation.getTitre() + "\" (réf. "
+                            + reclamation.getReference() + ") est passé à : " + nouveauStatut + ".",
+                    reclamation.getId()
+            );
+        }
+
+        return reclamationSauvee;
     }
     // Appelée par : GET /api/admin/reclamations/par-statut?statut=EN_COURS
 // Nécessite dans ReclamationRepository : List<Reclamation> findByStatut(StatutReclamation statut);
@@ -345,6 +398,14 @@ public Affectation assignerAgent(Long reclamationId, Long agentId) {
             );
             historiqueRepository.save(historique);
 
+            notificationService.creer(
+                    agentMoinsCharge,
+                    "Nouvelle réclamation assignée",
+                    "La réclamation \"" + reclamation.getTitre() + "\" (réf. " + reclamation.getReference()
+                            + ") vous a été assignée automatiquement.",
+                    reclamation.getId()
+            );
+
             System.out.println("[AUTO-ASSIGN] ✅ Réclamation " +
                     reclamation.getReference() + " assignée à " +
                     agentMoinsCharge.getPrenom() + " " + agentMoinsCharge.getNom());
@@ -353,6 +414,23 @@ public Affectation assignerAgent(Long reclamationId, Long agentId) {
             System.err.println("[AUTO-ASSIGN] ❌" +
                     " Erreur : " + e.getMessage());
         }
+    }
+
+
+    public List<HistoriqueStatut> getHistoriqueParCitoyen(Long reclamationId, String email) {
+        // 1. Vérifier que la réclamation existe
+        Reclamation rec = reclamationRepository.findById(reclamationId)
+                .orElseThrow(() -> new RuntimeException("Réclamation introuvable."));
+
+        // 2. Sécurité : vérifier que c'est bien la réclamation du citoyen connecté
+        if (!rec.getCitoyen().getEmail().equals(email)) {
+            throw new RuntimeException("Accès non autorisé à cette réclamation.");
+        }
+
+        // 3. Retourner l'historique trié du plus récent au plus ancien
+        // historiqueRepository est déjà injecté dans ReclamationService
+        return historiqueRepository
+                .findByReclamationIdOrderByDateChangementDesc(reclamationId);
     }
 
 }

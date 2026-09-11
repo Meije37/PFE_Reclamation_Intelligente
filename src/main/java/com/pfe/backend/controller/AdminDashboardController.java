@@ -1,5 +1,6 @@
 package com.pfe.backend.controller;
 
+import com.pfe.backend.dto.DashboardChartsDTO;
 import com.pfe.backend.dto.DashboardStatsDTO;
 import com.pfe.backend.service.DashboardService;
 import lombok.RequiredArgsConstructor;
@@ -16,5 +17,10 @@ public class AdminDashboardController {
     @GetMapping("/stats")
     public ResponseEntity<DashboardStatsDTO> getStats() {
         return ResponseEntity.ok(dashboardService.getDashboardStats());
+    }
+
+    @GetMapping("/charts")
+    public ResponseEntity<DashboardChartsDTO> getCharts() {
+        return ResponseEntity.ok(dashboardService.getDashboardCharts());
     }
 }

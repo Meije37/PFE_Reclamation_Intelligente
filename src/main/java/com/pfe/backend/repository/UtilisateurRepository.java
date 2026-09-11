@@ -25,4 +25,6 @@ public interface UtilisateurRepository extends JpaRepository<Utilisateur, Long> 
             Role role
     );
 
+    List<Utilisateur> findByRole(Role role);
+
 }
