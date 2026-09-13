@@ -80,8 +80,11 @@ public class ReclamationService {
         notifierAdminsNouvelleReclamation(savedRec);
 
         assignerAutomatiquement(savedRec, categorie);
+assignerAutomatiquement(savedRec, categorie);
 
-        return savedRec;
+notificationService.notifierAdminsNouvelleReclamation(savedRec);
+
+return savedRec;
     }
 
     /**
@@ -267,6 +270,36 @@ public class ReclamationService {
 
     }
 
+    // Créer l'affectation
+    Affectation affectation = new Affectation();
+    affectation.setReclamation(reclamation);
+    affectation.setAgent(agent);
+    affectation.setModeAffectation(ModeAffectation.MANUELLE);
+    affectation.setDateAffectation(LocalDateTime.now());
+    affectation.setCommentaire("Affectation manuelle par l'administrateur");
+
+    // Passer EN_COURS automatiquement si encore OUVERTE
+    if (reclamation.getStatut() == StatutReclamation.OUVERTE) {
+        StatutReclamation ancienStatut = reclamation.getStatut();
+        reclamation.setStatut(StatutReclamation.EN_COURS);
+        reclamationRepository.save(reclamation);
+
+        HistoriqueStatut historique = new HistoriqueStatut();
+        historique.setReclamation(reclamation);
+        historique.setAncienStatut(ancienStatut);
+        historique.setNouveauStatut(StatutReclamation.EN_COURS);
+        historique.setDateChangement(LocalDateTime.now());
+        historique.setCommentaire("Statut mis à jour automatiquement lors de l'affectation à l'agent : "
+                + agent.getPrenom() + " " + agent.getNom());
+        historiqueRepository.save(historique);
+    }
+
+   Affectation saved = affectationRepository.save(affectation);
+notificationService.notifierAgentAssigne(agent, reclamation);
+return saved;
+
+}
+
 
     @Transactional
     public Reclamation changerStatut(Long reclamationId, ChangerStatutRequestDTO dto) {
@@ -380,9 +413,11 @@ public class ReclamationService {
                             " — Agent : " + agentMoinsCharge.getPrenom() +
                             " " + agentMoinsCharge.getNom()
             );
-            affectationRepository.save(affectation);
+           affectationRepository.save(affectation);
 
-            StatutReclamation ancienStatut = reclamation.getStatut();
+notificationService.notifierAgentAssigne(agentMoinsCharge, reclamation);
+
+StatutReclamation ancienStatut = reclamation.getStatut();
             reclamation.setStatut(StatutReclamation.EN_COURS);
             reclamationRepository.save(reclamation);
 
@@ -433,4 +468,3 @@ public class ReclamationService {
                 .findByReclamationIdOrderByDateChangementDesc(reclamationId);
     }
 
-}
