@@ -190,6 +190,10 @@ public class AgentController {
         dto.put("dateCreation", r.getDateCreation().toString());
         dto.put("estDoublon",   r.getEstDoublon());
         dto.put("nombreVotes",  voteRepository.countByReclamation_Id(r.getId()));
+        // Vrai seulement pour le responsable ACTUEL (affectation la plus récente).
+        // Un agent qui n'a qu'une intervention, ou un ancien responsable après
+        // réassignation, voit le dossier mais ne peut pas changer son statut.
+        dto.put("estResponsable", estResponsable(id, agent.getId()));
 
         if (r.getCategorie() != null) {
             dto.put("categorieNom", r.getCategorie().getNom());
@@ -253,21 +257,38 @@ public class AgentController {
         // (Affectation) uniquement : changer le statut global du dossier
         // est une décision réservée au responsable principal, pas à
         // n'importe quel agent qui a juste une intervention dessus.
-        boolean assignee = affectationRepository.findAll().stream()
-                .anyMatch(a -> a.getReclamation().getId().equals(id)
-                        && a.getAgent().getId().equals(agent.getId()));
+        boolean assignee = estResponsable(id, agent.getId());
         if (!assignee) {
             throw new RuntimeException("Cette réclamation ne vous est pas assignée.");
         }
 
         String nouveauStatutStr = body.get("nouveauStatut");
-        String commentaire      = body.getOrDefault("commentaire", "");
+        String commentaire      = body.get("commentaire") == null ? "" : body.get("commentaire").trim();
 
         StatutReclamation nouveauStatut;
         try {
             nouveauStatut = StatutReclamation.valueOf(nouveauStatutStr.toUpperCase());
         } catch (Exception e) {
             throw new RuntimeException("Statut invalide : " + nouveauStatutStr);
+        }
+
+        // Un agent ne peut choisir que EN_COURS, RESOLUE ou REJETEE.
+        if (nouveauStatut != StatutReclamation.EN_COURS
+                && nouveauStatut != StatutReclamation.RESOLUE
+                && nouveauStatut != StatutReclamation.REJETEE) {
+            throw new RuntimeException("Un agent ne peut pas mettre ce statut : " + nouveauStatut);
+        }
+
+        // Un dossier clos (résolu, rejeté, fermé, annulé) ne se rouvre pas côté agent :
+        // seul l'administrateur peut le faire.
+        if (r.getStatut() != null && r.getStatut().estClos()) {
+            throw new RuntimeException("Cette réclamation est déjà " + r.getStatut().getLibelle()
+                    + " : seul un administrateur peut la rouvrir.");
+        }
+
+        // Le citoyen doit pouvoir comprendre pourquoi sa réclamation est refusée.
+        if (nouveauStatut == StatutReclamation.REJETEE && commentaire.isEmpty()) {
+            throw new RuntimeException("Un motif est obligatoire pour rejeter une réclamation.");
         }
 
         // Enregistrer historique
@@ -287,9 +308,8 @@ public class AgentController {
         if (r.getCitoyen() != null) {
             notificationService.creer(
                     r.getCitoyen(),
-                    "Mise à jour de votre réclamation",
-                    "Le statut de votre réclamation \"" + r.getTitre() + "\" (réf. "
-                            + r.getReference() + ") est passé à : " + nouveauStatut + ".",
+                    com.pfe.backend.service.MessagesStatut.titre(nouveauStatut),
+                    com.pfe.backend.service.MessagesStatut.message(r, nouveauStatut, commentaire),
                     r.getId()
             );
         }
@@ -345,5 +365,14 @@ public class AgentController {
         dto.put("role",      agent.getRole().name());
 
         return ResponseEntity.ok(dto);
+    }
+
+    /** Responsable actuel = agent de l'affectation la plus récente de la réclamation. */
+    private boolean estResponsable(Long reclamationId, Long agentId) {
+        return affectationRepository.findByReclamationIdOrderByDateAffectationDesc(reclamationId)
+                .stream()
+                .findFirst()
+                .map(a -> a.getAgent() != null && a.getAgent().getId().equals(agentId))
+                .orElse(false);
     }
 }

@@ -14,6 +14,9 @@ import java.util.List;
 
 @Repository
 public interface ReclamationRepository extends JpaRepository<Reclamation, Long> {
+
+    // Statistiques publiques (accueil visiteur)
+    long countByStatut(StatutReclamation statut);
     List<Reclamation> findByCitoyenId(Long id);
     // Variante paginee, utilisee par l'app mobile pour "Mes réclamations"
     // (évite de tout charger d'un coup si un citoyen en a beaucoup).

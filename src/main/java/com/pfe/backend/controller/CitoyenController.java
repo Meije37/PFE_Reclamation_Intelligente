@@ -27,6 +27,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import com.pfe.backend.service.MotifsHistorique;
 
 @RestController
 @RequestMapping("/api/citoyen")
@@ -106,6 +107,12 @@ public class CitoyenController {
         return ResponseEntity.ok(voteService.basculerVote(authentication.getName(), id));
     }
 
+    @GetMapping("/reclamations/publiques/{id}")
+    public ResponseEntity<Map<String, Object>> getDetailPublique(
+            @PathVariable Long id, Authentication authentication) {
+        return ResponseEntity.ok(voteService.getDetailPublique(id, authentication.getName()));
+    }
+
     @GetMapping("/reclamations/{id}")
     public ResponseEntity<Reclamation> getDétails(@PathVariable Long id, Authentication authentication) {
         return ResponseEntity.ok(reclamationService.getReclamationDetaillee(id, authentication.getName()));
@@ -121,14 +128,30 @@ public class CitoyenController {
 //        return ResponseEntity.ok(reclamationService.getCitoyenStats(id));
 //    }
 
-    // ✅ Correct — retourne List<HistoriqueStatut> directement
+    /**
+     * Historique des statuts d'une réclamation du citoyen connecté. On n'expose que ce dont
+     * l'application a besoin (plus l'entité complète), et le « motif » seulement s'il a été
+     * saisi par une personne : les textes automatiques (« Assignation automatique à l'agent X »)
+     * nomment un agent.
+     */
     @GetMapping("/reclamations/{id}/historique")
-    public ResponseEntity<List<HistoriqueStatut>> getHistorique(
+    public ResponseEntity<List<java.util.Map<String, Object>>> getHistorique(
             @PathVariable Long id,
             Authentication authentication) {
-        return ResponseEntity.ok(
+        List<java.util.Map<String, Object>> historique =
                 reclamationService.getHistoriqueParCitoyen(id, authentication.getName())
-        );
+                        .stream()
+                        .map(h -> {
+                            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+                            m.put("idHistorique", h.getIdHistorique());
+                            m.put("ancienStatut", h.getAncienStatut() != null ? h.getAncienStatut().name() : null);
+                            m.put("nouveauStatut", h.getNouveauStatut() != null ? h.getNouveauStatut().name() : null);
+                            m.put("dateChangement", h.getDateChangement() != null ? h.getDateChangement().toString() : null);
+                            m.put("commentaire", MotifsHistorique.motifPublic(h.getCommentaire()));
+                            return m;
+                        })
+                        .collect(java.util.stream.Collectors.toList());
+        return ResponseEntity.ok(historique);
     }
 
 

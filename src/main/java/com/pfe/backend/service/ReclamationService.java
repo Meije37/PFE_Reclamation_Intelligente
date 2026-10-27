@@ -7,8 +7,12 @@ import com.pfe.backend.entity.enums.ModeAffectation;
 import com.pfe.backend.entity.enums.Priorite;
 import com.pfe.backend.entity.enums.Role;
 import com.pfe.backend.entity.enums.StatutReclamation;
+import com.pfe.backend.entity.enums.TypeAnalyseIA;
 import com.pfe.backend.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -33,6 +37,12 @@ public class ReclamationService {
     private final HistoriqueStatutRepository historiqueRepository;
     private final ServiceRepository serviceRepository;
     private final NotificationService notificationService;
+    private final AnalyseIARepository analyseIARepository;
+
+    private static final Logger log = LoggerFactory.getLogger(ReclamationService.class);
+
+    @Value("${ia.service.url}")
+    private String iaServiceUrl;
     @Transactional
     public Reclamation creerReclamation(ReclamationRequestDTO dto, String emailCitoyen) {
         // Validation Citoyen
@@ -66,16 +76,34 @@ public class ReclamationService {
         // Génération de la référence unique
         rec.setReference("REC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
 
-        // Simulation IA : Calcul du score d'urgence basé sur les mots-clés
-        rec.setScoreUrgence(analyserUrgenceIA(dto.getDescription()));
+        // IA : calcul du score d'urgence via le microservice Python (FastAPI).
+        // NB: le microservice lui-même fait actuellement une analyse par
+        // mots-clés (pas un modèle entraîné) — voir AnalyseIA.modeleUtilise
+        // ci-dessous, qui trace honnêtement cette limite.
+        ResultatAnalyseUrgence resultatIA = analyserUrgenceIA(dto.getDescription());
+        rec.setScoreUrgence(resultatIA.score());
 
         // Détermination de la priorité automatique
         rec.setPriorite(determinerPriorite(rec.getScoreUrgence(), categorie.getPrioriteParDefaut()));
 
-        // Détection de doublon (simulée)
+        // Détection de doublon : pas encore implémentée (voir plan IA).
         rec.setEstDoublon(false);
 
         Reclamation savedRec = reclamationRepository.save(rec);
+
+        // Trace de l'analyse IA, pour audit et pour le futur écran
+        // Human-in-the-Loop (voir plan IA) : jamais un échec silencieux,
+        // qu'on soit passé par le microservice ou par le score de secours.
+        AnalyseIA analyse = new AnalyseIA();
+        analyse.setReclamation(savedRec);
+        analyse.setTypeAnalyse(TypeAnalyseIA.NLP);
+        analyse.setResultat(resultatIA.resultatBrut());
+        analyse.setScoreConfiance(resultatIA.score());
+        analyse.setModeleUtilise(resultatIA.viaFallback()
+                ? "score de secours (microservice injoignable)"
+                : "microservice-mots-cles-v0 (simulation, pas encore un modele entraine)");
+        analyse.setDateAnalyse(LocalDateTime.now());
+        analyseIARepository.save(analyse);
 
         notifierAdminsNouvelleReclamation(savedRec);
 
@@ -139,18 +167,36 @@ public class ReclamationService {
 
     // --- Fonctions privées de logique "IA" ---
 
-    private Double analyserUrgenceIA(String description) {
-        try {
-            String url = "http://127.0.0.1:8000/predict-urgency";
-            Map<String, String> request = Map.of("text", description);
+    /** Résultat d'un appel au microservice IA, avant persistance en base. */
+    private record ResultatAnalyseUrgence(
+            double score,
+            String resultatBrut,   // JSON brut renvoyé par le microservice (ou message d'erreur)
+            boolean viaFallback    // true si le microservice était injoignable/en erreur
+    ) {}
 
-            // Appel direct au service Python
+    private ResultatAnalyseUrgence analyserUrgenceIA(String description) {
+        String url = iaServiceUrl + "/predict-urgency";
+        try {
+            Map<String, String> request = Map.of("text", description);
             Map<String, Object> response = restTemplate.postForObject(url, request, Map.class);
 
-            return (Double) response.get("score");
+            // Le score peut arriver en Double ou en Integer selon le JSON
+            // renvoyé par Python (ex: "score": 1 vs "score": 1.0) : on
+            // normalise via Number plutôt qu'un cast direct en Double, qui
+            // lèverait une ClassCastException silencieusement avalée par
+            // le catch ci-dessous.
+            Number scoreBrut = (Number) response.get("score");
+            double score = scoreBrut != null ? scoreBrut.doubleValue() : 0.5;
+
+            return new ResultatAnalyseUrgence(score, String.valueOf(response), false);
         } catch (Exception e) {
-            System.err.println("Erreur de connexion au service IA: " + e.getMessage());
-            return 0.5; // Score de secours si Python est éteint
+            // Score de secours si le microservice Python est injoignable,
+            // trop lent (timeout), ou renvoie une réponse inattendue.
+            // Tracé dans les logs ET en base (AnalyseIA) pour que ce ne
+            // soit jamais un échec silencieux.
+            log.warn("Microservice IA injoignable ({}), score de secours utilisé pour : {}",
+                    url, e.getMessage());
+            return new ResultatAnalyseUrgence(0.5, "Erreur: " + e.getMessage(), true);
         }
     }
 
@@ -286,13 +332,19 @@ public class ReclamationService {
 
         StatutReclamation ancienStatut = reclamation.getStatut();
 
+        // Le citoyen doit pouvoir comprendre pourquoi sa réclamation est refusée.
+        String motif = dto.getCommentaire() == null ? "" : dto.getCommentaire().trim();
+        if (nouveauStatut == StatutReclamation.REJETEE && motif.isEmpty()) {
+            throw new RuntimeException("Un motif est obligatoire pour rejeter une réclamation.");
+        }
+
         // Sauvegarder dans l'historique
         HistoriqueStatut historique = new HistoriqueStatut();
         historique.setReclamation(reclamation);
         historique.setAncienStatut(ancienStatut);
         historique.setNouveauStatut(nouveauStatut);
         historique.setDateChangement(LocalDateTime.now());
-        historique.setCommentaire(dto.getCommentaire());
+        historique.setCommentaire(motif.isEmpty() ? dto.getCommentaire() : motif);
         historiqueRepository.save(historique);
 
         // Mettre à jour la réclamation
@@ -302,9 +354,8 @@ public class ReclamationService {
         if (reclamation.getCitoyen() != null) {
             notificationService.creer(
                     reclamation.getCitoyen(),
-                    "Mise à jour de votre réclamation",
-                    "Le statut de votre réclamation \"" + reclamation.getTitre() + "\" (réf. "
-                            + reclamation.getReference() + ") est passé à : " + nouveauStatut + ".",
+                    MessagesStatut.titre(nouveauStatut),
+                    MessagesStatut.message(reclamation, nouveauStatut, motif),
                     reclamation.getId()
             );
         }

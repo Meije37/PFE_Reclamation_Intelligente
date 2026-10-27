@@ -20,6 +20,11 @@ public class Intervention {
     private Long idIntervention;
     private LocalDateTime dateDebut;
     private LocalDateTime dateFin;
+
+    // Heure réelle de démarrage (clic sur « Démarrer »). dateDebut, elle, est la date de planification.
+    // Nulle pour les interventions antérieures à l'ajout de ce champ.
+    private LocalDateTime dateDemarrage;
+    @Column(length = 1000)
     private String resultat;
     private Double coutEstime;
 
@@ -40,4 +45,15 @@ public class Intervention {
     @ManyToOne
     @JoinColumn(name = "agent_id")
     private Utilisateur agent;
+
+    // Qui a planifié l'intervention (peut être différent de l'agent exécutant).
+    // Sert à lui permettre d'annuler sa planification tant qu'elle n'a pas démarré.
+    // Nul pour les interventions créées avant l'ajout de ce champ.
+    @ManyToOne
+    @JoinColumn(name = "planifie_par_id")
+    private Utilisateur planifiePar;
+
+    // Vrai si l'agent exécutant a été choisi par le système (et non par l'utilisateur).
+    // Wrapper Boolean : les anciennes lignes de la table ont une valeur nulle.
+    private Boolean affectationAutomatique;
 }
