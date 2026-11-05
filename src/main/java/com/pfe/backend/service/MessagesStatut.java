@@ -27,9 +27,13 @@ public final class MessagesStatut {
                 .append("\" (réf. ").append(r.getReference()).append(") est maintenant : ")
                 .append(statut.getLibelle()).append(".");
 
-        String motifPublic = MotifsHistorique.motifPublic(motif);
+        String motifPublic = com.pfe.backend.service.MotifsHistorique.motifPublic(motif);
         if (statut == StatutReclamation.REJETEE && motifPublic != null) {
             sb.append(" Motif : ").append(motifPublic);
+        }
+        // Étape 8 : inviter le citoyen à noter le traitement.
+        if (statut == StatutReclamation.RESOLUE) {
+            sb.append(" Donnez votre avis (note de 1 à 5) depuis le suivi de la réclamation.");
         }
         return sb.toString();
     }

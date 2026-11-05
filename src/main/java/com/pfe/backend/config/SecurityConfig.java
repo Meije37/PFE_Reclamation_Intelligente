@@ -46,12 +46,24 @@ public class SecurityConfig {
                         .requestMatchers("/api/public/**").permitAll()
                         .requestMatchers("/uploads/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
+                        // Page d'erreur de Spring : sans cette ligne, toute erreur serveur (500)
+                        // arrive au client sous la forme d'un faux « 403 accès refusé ».
+                        .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/agent/**").hasAnyRole("AGENT", "ADMIN")
                         .requestMatchers("/api/citoyen/**").hasAnyRole("CITOYEN", "ADMIN")
                         .requestMatchers("/api/reclamations/assigner/**", "/api/reclamations/statut/**").hasAnyRole("ADMIN", "AGENT")
                         .anyRequest().authenticated()
                 )
+                // Jeton absent, invalide ou EXPIRÉ → 401 (et non 403) : l'app mobile déconnecte
+                // proprement (« Votre session a expiré ») et le web tente un renouvellement du jeton.
+                // Un utilisateur connecté mais sans le bon rôle reçoit toujours 403.
+                .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(401);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write(
+                            "{\"statut\":401,\"message\":\"Votre session a expiré. Veuillez vous reconnecter.\"}");
+                }))
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
@@ -64,20 +76,31 @@ public class SecurityConfig {
     @org.springframework.beans.factory.annotation.Value("${app.cors.allowed-origins:http://localhost:4200}")
     private String allowedOriginsProp;
 
+    /** Origines web autorisées (propriété app.cors.allowed-origins, séparées par des virgules). */
+    public static List<String> origines(String propriete) {
+        return Arrays.stream(propriete.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty() && !s.equals("*"))   // « * » refusé : n'importe quel site pourrait appeler l'API
+                .toList();
+    }
+
+    /**
+     * CORS = quels SITES WEB (autres que l'API elle-même) ont le droit d'appeler l'API depuis un navigateur.
+     * Règle unique pour toute l'application (plus aucun @CrossOrigin dans les contrôleurs) :
+     *  - seul le tableau de bord Angular (http://localhost:4200 en développement) est autorisé ;
+     *  - l'application mobile n'est pas concernée : le CORS ne s'applique qu'aux navigateurs.
+     * En production : variable d'environnement APP_CORS_ALLOWED_ORIGINS=https://admin.mon-domaine.mr
+     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Liste explicite d'origines (jamais de "*" combiné à allowCredentials=true : faille de sécurité).
-        // En prod, définir la variable d'environnement APP_CORS_ALLOWED_ORIGINS
-        // (ex: "https://mon-domaine.mr,https://admin.mon-domaine.mr").
-        List<String> origins = Arrays.stream(allowedOriginsProp.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .toList();
-        configuration.setAllowedOrigins(origins);
+        configuration.setAllowedOrigins(origines(allowedOriginsProp));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept"));
+        // Lisibles par le navigateur : nom du fichier Excel exporté, délai après « trop de tentatives ».
+        configuration.setExposedHeaders(Arrays.asList("Content-Disposition", "Retry-After"));
         configuration.setAllowCredentials(true);
+        configuration.setMaxAge(3600L);   // le navigateur garde la réponse « preflight » 1 h
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

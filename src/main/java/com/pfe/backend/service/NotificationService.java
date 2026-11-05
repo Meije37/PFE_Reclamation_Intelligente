@@ -41,7 +41,8 @@ public class NotificationService {
     public void creer(Utilisateur destinataire, String titre, String message, Long reclamationId) {
         Notification notification = new Notification();
         notification.setDestinataire(destinataire);
-        notification.setTitre(titre);
+        // La colonne titre reste en VARCHAR(255) : on coupe proprement un titre trop long.
+        notification.setTitre(titre != null && titre.length() > 255 ? titre.substring(0, 252) + "…" : titre);
         notification.setMessage(message);
         notification.setType(TypeNotification.PUSH);
         notification.setEtat(EtatNotification.ENVOYEE);

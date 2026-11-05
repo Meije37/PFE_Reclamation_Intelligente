@@ -26,12 +26,17 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final StompAuthChannelInterceptor stompAuthChannelInterceptor;
 
+    @org.springframework.beans.factory.annotation.Value("${app.cors.allowed-origins:http://localhost:4200}")
+    private String allowedOriginsProp;
+
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         // Pas de SockJS : un WebSocket natif suffit et simplifie le client
         // mobile (stomp_dart_client) qui ne gère pas le fallback SockJS.
+        // Mêmes origines web que l'API REST (avant : « * », n'importe quel site).
+        // L'app mobile n'envoie pas d'en-tête Origin : elle n'est pas concernée par ce filtre.
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*");
+                .setAllowedOrigins(SecurityConfig.origines(allowedOriginsProp).toArray(String[]::new));
     }
 
     @Override

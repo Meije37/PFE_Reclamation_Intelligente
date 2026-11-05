@@ -16,11 +16,28 @@ import java.util.LinkedHashMap;
 @RestController
 @RequestMapping("/api/admin/categories")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class AdminCategorieController {
 
     private final CategorieReclamationRepository categorieRepository;
     private final ServiceRepository serviceRepository;
+
+    /** Familles reconnues par l'IA (voir FAMILLE_INCIDENT dans pfe-ai-service/app/moteur.py). */
+    private static final java.util.Set<String> FAMILLES_IA =
+            new java.util.HashSet<>(com.pfe.backend.entity.FamillesIA.TOUTES);
+
+    /** Accepte une liste ["EAU_ASSAINISSEMENT", …] ou une chaîne « A,B » ; renvoie « A,B » ou null. */
+    private static String famillesIA(Object valeur) {
+        if (valeur == null) return null;
+        java.util.List<String> brut = valeur instanceof java.util.Collection<?> c
+                ? c.stream().map(String::valueOf).toList()
+                : java.util.Arrays.asList(valeur.toString().split(","));
+        java.util.List<String> familles = brut.stream()
+                .map(f -> f.trim().toUpperCase()).filter(f -> !f.isEmpty()).distinct().toList();
+        for (String f : familles) {
+            if (!FAMILLES_IA.contains(f)) throw new RuntimeException("Famille IA inconnue : " + f);
+        }
+        return familles.isEmpty() ? null : String.join(",", familles);
+    }
 
     private Map<String, Object> toDTO(CategorieReclamation c) {
         Map<String, Object> dto = new LinkedHashMap<>();
@@ -28,6 +45,9 @@ public class AdminCategorieController {
         dto.put("nom",               c.getNom());
         dto.put("description",       c.getDescription());
         dto.put("prioriteParDefaut", c.getPrioriteParDefaut());
+        dto.put("famillesIA",        c.listeFamillesIA());         // familles utilisées par l'IA
+        dto.put("famillesIAManuelles", c.famillesIAManuelles());   // cochées à la main (peut être vide)
+        dto.put("famillesIADeduites",  c.famillesIADeduites());    // déduites du nom du service
         if (c.getServiceResponsable() != null) {
             dto.put("serviceId",  c.getServiceResponsable().getId());
             dto.put("serviceNom", c.getServiceResponsable().getNom());
@@ -51,6 +71,8 @@ public class AdminCategorieController {
         cat.setNom((String) body.get("nom"));
         cat.setDescription((String) body.get("description"));
         cat.setPrioriteParDefaut((Integer) body.get("prioriteParDefaut"));
+        cat.setFamillesIA(famillesIA(body.get("famillesIA")));
+        cat.setFamilleIA(null); // ancienne colonne remplacée par famillesIA
         if (body.get("serviceId") != null) {
             Long serviceId = Long.valueOf(body.get("serviceId").toString());
             serviceRepository.findById(serviceId).ifPresent(cat::setServiceResponsable);
@@ -66,6 +88,8 @@ public class AdminCategorieController {
         cat.setNom((String) body.get("nom"));
         cat.setDescription((String) body.get("description"));
         cat.setPrioriteParDefaut((Integer) body.get("prioriteParDefaut"));
+        cat.setFamillesIA(famillesIA(body.get("famillesIA")));
+        cat.setFamilleIA(null); // ancienne colonne remplacée par famillesIA
         if (body.get("serviceId") != null) {
             Long serviceId = Long.valueOf(body.get("serviceId").toString());
             serviceRepository.findById(serviceId).ifPresent(cat::setServiceResponsable);

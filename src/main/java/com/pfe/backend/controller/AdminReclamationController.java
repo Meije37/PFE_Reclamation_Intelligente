@@ -54,7 +54,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/admin/reclamations")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class AdminReclamationController {
 
     private final ReclamationService reclamationService;
@@ -62,6 +61,7 @@ public class AdminReclamationController {
     private final UtilisateurRepository utilisateurRepository;
     private final AffectationRepository affectationRepository;
     private final VoteRepository voteRepository;
+    private final com.pfe.backend.service.EvaluationService evaluationService;
 
     // ── Remplissage du compteur de votes (lecture seule, purement informatif) ──
     // Le champ Reclamation.nombreVotes n'est pas en base (voir @Transient) :
@@ -185,11 +185,30 @@ public class AdminReclamationController {
 
     @GetMapping("/agents")
     public ResponseEntity<List<java.util.Map<String, Object>>> getAgents() {
+        // Charge = réclamations non closes dont l'agent est le responsable ACTUEL (affectation la plus récente).
+        Map<Long, Affectation> derniere = new java.util.HashMap<>();
+        for (Affectation a : affectationRepository.findAll()) {
+            if (a.getReclamation() == null || a.getAgent() == null) continue;
+            Affectation avant = derniere.get(a.getReclamation().getId());
+            if (avant == null || (a.getDateAffectation() != null && avant.getDateAffectation() != null
+                    && a.getDateAffectation().isAfter(avant.getDateAffectation()))) {
+                derniere.put(a.getReclamation().getId(), a);
+            }
+        }
+        Map<Long, Long> charge = derniere.values().stream()
+                .filter(a -> a.getReclamation().getStatut() != null && !a.getReclamation().getStatut().estClos())
+                .collect(java.util.stream.Collectors.groupingBy(a -> a.getAgent().getId(), java.util.stream.Collectors.counting()));
+
         List<java.util.Map<String, Object>> agents = utilisateurRepository.findAll()
                 .stream()
                 .filter(u -> u.getRole() == Role.AGENT && u.getActif())
                 .map(u -> {
                     java.util.Map<String, Object> agent = new java.util.LinkedHashMap<>();
+                    // Service et charge actuelle : la page de détail propose d'abord les agents
+                    // du service de la catégorie, les moins chargés en premier.
+                    agent.put("serviceId",  u.getService() != null ? u.getService().getId() : null);
+                    agent.put("serviceNom", u.getService() != null ? u.getService().getNom() : null);
+                    agent.put("enCours",    charge.getOrDefault(u.getId(), 0L));
                     agent.put("id",        u.getId());
                     agent.put("nom",       u.getNom());
                     agent.put("prenom",    u.getPrenom());
@@ -201,6 +220,12 @@ public class AdminReclamationController {
                 .toList();
         return ResponseEntity.ok(agents);
     }
+    // GET /api/admin/reclamations/{id}/avis — avis du citoyen {note, commentaire, dateEvaluation}, ou 204
+    @GetMapping("/{id}/avis")
+    public ResponseEntity<Map<String, Object>> getAvis(@PathVariable Long id) {
+        return evaluationService.avisDe(id).map(ResponseEntity::ok).orElse(ResponseEntity.noContent().build());
+    }
+
     // GET /api/admin/reclamations/{id}/agent-assigne
     @GetMapping("/{id}/agent-assigne")
     public ResponseEntity<Map<String, Object>> getAgentAssigne(@PathVariable Long id) {

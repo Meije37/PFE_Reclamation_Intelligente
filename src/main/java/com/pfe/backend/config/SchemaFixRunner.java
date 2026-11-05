@@ -3,10 +3,12 @@ package com.pfe.backend.config;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 @Component
+@Order(0) // avant les autres runners (création de l'admin, données de démonstration)
 @RequiredArgsConstructor
 @Slf4j
 public class SchemaFixRunner implements CommandLineRunner {
@@ -17,6 +19,13 @@ public class SchemaFixRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        // Hibernate (ddl-auto=update) n'agrandit pas une colonne existante : message passe en TEXT ici.
+        try {
+            jdbcTemplate.execute("ALTER TABLE notification ALTER COLUMN message TYPE TEXT");
+        } catch (Exception e) {
+            log.warn("[SchemaFix] Colonne notification.message : {}", e.getMessage());
+        }
+
         try {
             String tableReferencee = jdbcTemplate.queryForObject("""
                 SELECT ccu.table_name

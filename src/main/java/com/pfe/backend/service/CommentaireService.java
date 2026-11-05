@@ -79,9 +79,12 @@ public class CommentaireService {
                                           String contenu, String visibiliteDemandee) {
         verifierAcces(reclamation, auteur);
 
-        // Réclamation rejetée : la discussion reste consultable mais n'accepte plus de message.
-        if (reclamation.getStatut() == StatutReclamation.REJETEE) {
-            throw new RuntimeException("Cette réclamation est rejetée : la discussion est en lecture seule.");
+        // Dossier clos (résolu, rejeté, fermé, annulé) : la discussion reste consultable mais
+        // n'accepte plus de message. Si le problème persiste, le citoyen donne une note basse
+        // (étape 8) : l'administration est alertée et peut rouvrir le dossier, ce qui rouvre la discussion.
+        if (reclamation.getStatut() != null && reclamation.getStatut().estClos()) {
+            throw new RuntimeException("Cette réclamation est " + reclamation.getStatut().getLibelle()
+                    + " : la discussion est en lecture seule.");
         }
 
         if (contenu == null || contenu.trim().isEmpty()) {

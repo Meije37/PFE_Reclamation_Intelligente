@@ -20,6 +20,9 @@ public class Notification {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long idNotification;
     private String titre;
+
+    // TEXT : un message peut dépasser 255 caractères (ex. réclamation à vérifier avec son titre complet).
+    @Column(columnDefinition = "TEXT")
     private String message;
     @Enumerated(EnumType.STRING)
     private TypeNotification type;

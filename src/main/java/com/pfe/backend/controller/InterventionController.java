@@ -27,7 +27,6 @@ import com.pfe.backend.dto.InterventionTransfertDTO;
 
 @RestController
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 @PreAuthorize("hasAnyRole('AGENT', 'ADMIN')")
 public class InterventionController {
 

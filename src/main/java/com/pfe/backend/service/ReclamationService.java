@@ -12,13 +12,13 @@ import com.pfe.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.data.domain.PageRequest;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -32,7 +32,8 @@ public class ReclamationService {
     private final CategorieReclamationRepository categorieRepository;
     private final UtilisateurRepository utilisateurRepository;
     private final LocalisationRepository localisationRepository;
-    private final RestTemplate restTemplate;
+    private final ServiceIAClient serviceIA;
+    private final DoublonIAService doublonIAService;
     private final AffectationRepository affectationRepository;
     private final HistoriqueStatutRepository historiqueRepository;
     private final ServiceRepository serviceRepository;
@@ -41,8 +42,12 @@ public class ReclamationService {
 
     private static final Logger log = LoggerFactory.getLogger(ReclamationService.class);
 
-    @Value("${ia.service.url}")
-    private String iaServiceUrl;
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    // Recherche des doublons : mêmes valeurs que models/doublons.json côté IA (rayon et fenêtre).
+    private static final double RAYON_RECHERCHE_M = 300;
+    private static final int FENETRE_JOURS = 30;
+    private static final int MAX_CANDIDATS = 100;
     @Transactional
     public Reclamation creerReclamation(ReclamationRequestDTO dto, String emailCitoyen) {
         // Validation Citoyen
@@ -76,36 +81,94 @@ public class ReclamationService {
         // Génération de la référence unique
         rec.setReference("REC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
 
-        // IA : calcul du score d'urgence via le microservice Python (FastAPI).
-        // NB: le microservice lui-même fait actuellement une analyse par
-        // mots-clés (pas un modèle entraîné) — voir AnalyseIA.modeleUtilise
-        // ci-dessous, qui trace honnêtement cette limite.
-        ResultatAnalyseUrgence resultatIA = analyserUrgenceIA(dto.getDescription());
-        rec.setScoreUrgence(resultatIA.score());
+        // ── IA (microservice FastAPI) : municipal ? priorité ? type d'incident ? ──────────
+        // Titre + description : le titre résume souvent le problème mieux que la description seule.
+        String texte = (dto.getTitre() == null ? "" : dto.getTitre() + ". ") + dto.getDescription();
+        Optional<ServiceIAClient.ResultatAnalyse> analyseIA = serviceIA.analyser(texte);
 
-        // Détermination de la priorité automatique
-        rec.setPriorite(determinerPriorite(rec.getScoreUrgence(), categorie.getPrioriteParDefaut()));
+        if (analyseIA.isPresent()) {
+            ServiceIAClient.ResultatAnalyse a = analyseIA.get();
+            rec.setScoreUrgence(a.scoreUrgence());
+            rec.setPriorite(prioriteDe(a.priorite(), categorie.getPrioriteParDefaut()));
+            // Proposition de l'IA conservée telle quelle : un humain pourra la confirmer ou la corriger.
+            rec.setPrioriteIA(rec.getPriorite());
+            rec.setAlerteCritiqueIA(a.alerteCritique());
+            rec.setIncidentIA(a.incident());
+            rec.setProbabiliteMunicipal(a.probabiliteMunicipal());
+            // Hors périmètre selon l'IA, OU confiance < 90 % : la décision revient à un humain.
+            rec.setPerimetreAVerifier(!a.estMunicipal() || !a.decisionAutomatique());
+            rec.setConfiancePrioriteIA(a.confiancePriorite());
+            // Le citoyen s'est-il trompé de catégorie ? (ex. coupure d'eau déposée en « Électricité »)
+            CategorieReclamation suggeree = categorieSuggeree(categorie, a);
+            rec.setFamilleSuggereeIA(a.familleSuggeree());
+            rec.setCategorieSuggereeIA(suggeree);
+            rec.setCategorieAVerifier(suggeree != null);
+        } else {
+            // Repli si le service IA est arrêté : on ne bloque jamais le dépôt d'une réclamation.
+            rec.setScoreUrgence(0.5);
+            rec.setPriorite(determinerPriorite(0.5, categorie.getPrioriteParDefaut()));
+        }
 
-        // Détection de doublon : pas encore implémentée (voir plan IA).
-        rec.setEstDoublon(false);
+        // ── IA : doublons (même problème déjà signalé tout près, récemment) ─────────────
+        List<Reclamation> candidats = chercherCandidatsDoublon(dto.getLatitude(), dto.getLongitude());
+        // Pas de candidat (ou pas de GPS) : rien à comparer, inutile d'appeler le service IA.
+        Optional<List<ServiceIAClient.Voisin>> voisins = candidats.isEmpty()
+                ? Optional.of(List.of())
+                : serviceIA.similaires(texte, dto.getLatitude(), dto.getLongitude(),
+                        candidats.stream()
+                                .map(c -> new ServiceIAClient.Candidat(c.getId(), texteDe(c),
+                                        c.getLocalisation().getLatitude(), c.getLocalisation().getLongitude()))
+                                .toList());
+        List<ServiceIAClient.Voisin> doublons = voisins.orElse(List.of()).stream()
+                .filter(ServiceIAClient.Voisin::doublonPotentiel)
+                .toList();
+        // Doublon POTENTIEL : la réclamation n'est ni bloquée ni fusionnée, un agent confirme (Human-in-the-Loop).
+        rec.setEstDoublon(!doublons.isEmpty());
 
         Reclamation savedRec = reclamationRepository.save(rec);
 
-        // Trace de l'analyse IA, pour audit et pour le futur écran
-        // Human-in-the-Loop (voir plan IA) : jamais un échec silencieux,
-        // qu'on soit passé par le microservice ou par le score de secours.
-        AnalyseIA analyse = new AnalyseIA();
-        analyse.setReclamation(savedRec);
-        analyse.setTypeAnalyse(TypeAnalyseIA.NLP);
-        analyse.setResultat(resultatIA.resultatBrut());
-        analyse.setScoreConfiance(resultatIA.score());
-        analyse.setModeleUtilise(resultatIA.viaFallback()
-                ? "score de secours (microservice injoignable)"
-                : "microservice-mots-cles-v0 (simulation, pas encore un modele entraine)");
-        analyse.setDateAnalyse(LocalDateTime.now());
-        analyseIARepository.save(analyse);
+        // ── Traces en base (audit + futur écran « Doublons à vérifier ») ─────────────────
+        AnalyseIA nlp = new AnalyseIA();
+        nlp.setReclamation(savedRec);
+        nlp.setTypeAnalyse(TypeAnalyseIA.NLP);
+        nlp.setDateAnalyse(LocalDateTime.now());
+        if (analyseIA.isPresent()) {
+            ServiceIAClient.ResultatAnalyse a = analyseIA.get();
+            nlp.setResultat(enJson(a.brut()));
+            nlp.setScoreConfiance(a.probabiliteMunicipal());
+            nlp.setModeleUtilise("pfe-ai-service v1 (municipal + priorité + type d'incident)");
+            if (Boolean.TRUE.equals(savedRec.getPerimetreAVerifier())) {
+                log.info("Réclamation {} : périmètre municipal à vérifier par un humain (p = {})",
+                        savedRec.getReference(), a.probabiliteMunicipal());
+            }
+        } else {
+            nlp.setResultat("Service IA injoignable : priorité de secours (catégorie).");
+            nlp.setScoreConfiance(0.5);
+            nlp.setModeleUtilise("score de secours (microservice injoignable)");
+        }
+        analyseIARepository.save(nlp);
 
-        notifierAdminsNouvelleReclamation(savedRec);
+        if (voisins.isPresent()) {
+            AnalyseIA analyseDoublon = new AnalyseIA();
+            analyseDoublon.setReclamation(savedRec);
+            analyseDoublon.setTypeAnalyse(TypeAnalyseIA.DETECTION_DOUBLON);
+            analyseDoublon.setDateAnalyse(LocalDateTime.now());
+            analyseDoublon.setDoublonDetecte(!doublons.isEmpty());
+            analyseDoublon.setScoreConfiance(doublons.stream()
+                    .mapToDouble(ServiceIAClient.Voisin::similarite).max().orElse(0));
+            analyseDoublon.setResultat(enJson(Map.of(
+                    "candidats_compares", candidats.size(),
+                    "doublons_potentiels", doublons.stream().map(d -> Map.of(
+                            "id", d.id(),
+                            "reference", referenceDe(candidats, d.id()),
+                            "distance_m", d.distanceM(),
+                            "similarite", d.similarite())).toList())));
+            analyseDoublon.setModeleUtilise("pfe-ai-service v1 (distance + similarité de texte)");
+            analyseIARepository.save(analyseDoublon);
+        }
+
+        notifierAdminsNouvelleReclamation(savedRec, doublons.isEmpty() ? null
+                : referenceDe(candidats, doublons.get(0).id()));
 
         assignerAutomatiquement(savedRec, categorie);
 
@@ -117,17 +180,33 @@ public class ReclamationService {
      * réclamation — leur permet de réagir vite même sans consulter le
      * dashboard en continu.
      */
-    private void notifierAdminsNouvelleReclamation(Reclamation reclamation) {
+    private void notifierAdminsNouvelleReclamation(Reclamation reclamation, String referenceDoublon) {
         List<Utilisateur> admins = utilisateurRepository.findByRole(Role.ADMIN);
+        boolean perimetre = Boolean.TRUE.equals(reclamation.getPerimetreAVerifier());
+        boolean horsPerimetreIA = perimetre && reclamation.getProbabiliteMunicipal() != null
+                && reclamation.getProbabiliteMunicipal() < 0.5;
+        String message = "\"" + reclamation.getTitre() + "\" (réf. " + reclamation.getReference()
+                + ") vient d'être déposée par un citoyen."
+                + (referenceDoublon != null
+                    ? " Doublon potentiel de " + referenceDoublon + " (à vérifier)."
+                    : "")
+                + (perimetre
+                    ? (horsPerimetreIA
+                        ? " L'IA estime qu'elle ne relève peut-être pas de la commune (périmètre à vérifier)."
+                        : " L'IA n'est pas sûre qu'elle relève de la commune (périmètre à vérifier).")
+                    : "");
 
+        boolean categorieDouteuse = Boolean.TRUE.equals(reclamation.getCategorieAVerifier());
+        if (categorieDouteuse) {
+            message += " Catégorie choisie : « " + reclamation.getCategorie().getNom()
+                    + " » ; l'IA suggère « " + reclamation.getCategorieSuggereeNom() + " » (catégorie à vérifier).";
+        }
+        String titre = referenceDoublon != null ? "Nouvelle réclamation (doublon potentiel)"
+                : perimetre ? "Nouvelle réclamation (périmètre à vérifier)"
+                : categorieDouteuse ? "Nouvelle réclamation (catégorie à vérifier)"
+                : "Nouvelle réclamation déposée";
         for (Utilisateur admin : admins) {
-            notificationService.creer(
-                    admin,
-                    "Nouvelle réclamation déposée",
-                    "\"" + reclamation.getTitre() + "\" (réf. " + reclamation.getReference()
-                            + ") vient d'être déposée par un citoyen.",
-                    reclamation.getId()
-            );
+            notificationService.creer(admin, titre, message, reclamation.getId());
         }
     }
 
@@ -167,39 +246,72 @@ public class ReclamationService {
 
     // --- Fonctions privées de logique "IA" ---
 
-    /** Résultat d'un appel au microservice IA, avant persistance en base. */
-    private record ResultatAnalyseUrgence(
-            double score,
-            String resultatBrut,   // JSON brut renvoyé par le microservice (ou message d'erreur)
-            boolean viaFallback    // true si le microservice était injoignable/en erreur
-    ) {}
+    /** Réclamations ouvertes ou en cours, récentes et proches : candidates au statut de doublon. */
+    private List<Reclamation> chercherCandidatsDoublon(Double lat, Double lon) {
+        if (lat == null || lon == null) {
+            return List.of();
+        }
+        // Carré de ± RAYON autour du point (1° de latitude ≈ 111 km) ; le service IA affine.
+        double dLat = RAYON_RECHERCHE_M / 111_320.0;
+        double dLon = RAYON_RECHERCHE_M / (111_320.0 * Math.cos(Math.toRadians(lat)));
+        return reclamationRepository.findCandidatsDoublon(
+                List.of(StatutReclamation.OUVERTE, StatutReclamation.EN_COURS),
+                LocalDateTime.now().minusDays(FENETRE_JOURS),
+                lat - dLat, lat + dLat, lon - dLon, lon + dLon,
+                PageRequest.of(0, MAX_CANDIDATS));
+    }
 
-    private ResultatAnalyseUrgence analyserUrgenceIA(String description) {
-        String url = iaServiceUrl + "/predict-urgency";
+    private static String texteDe(Reclamation r) {
+        return (r.getTitre() == null ? "" : r.getTitre() + ". ")
+                + (r.getDescription() == null ? "" : r.getDescription());
+    }
+
+    private static String referenceDe(List<Reclamation> liste, long id) {
+        return liste.stream().filter(r -> r.getId() == id).map(Reclamation::getReference)
+                .findFirst().orElse("#" + id);
+    }
+
+    private static String enJson(Object valeur) {
         try {
-            Map<String, String> request = Map.of("text", description);
-            Map<String, Object> response = restTemplate.postForObject(url, request, Map.class);
-
-            // Le score peut arriver en Double ou en Integer selon le JSON
-            // renvoyé par Python (ex: "score": 1 vs "score": 1.0) : on
-            // normalise via Number plutôt qu'un cast direct en Double, qui
-            // lèverait une ClassCastException silencieusement avalée par
-            // le catch ci-dessous.
-            Number scoreBrut = (Number) response.get("score");
-            double score = scoreBrut != null ? scoreBrut.doubleValue() : 0.5;
-
-            return new ResultatAnalyseUrgence(score, String.valueOf(response), false);
+            return JSON.writeValueAsString(valeur);
         } catch (Exception e) {
-            // Score de secours si le microservice Python est injoignable,
-            // trop lent (timeout), ou renvoie une réponse inattendue.
-            // Tracé dans les logs ET en base (AnalyseIA) pour que ce ne
-            // soit jamais un échec silencieux.
-            log.warn("Microservice IA injoignable ({}), score de secours utilisé pour : {}",
-                    url, e.getMessage());
-            return new ResultatAnalyseUrgence(0.5, "Erreur: " + e.getMessage(), true);
+            return String.valueOf(valeur);
         }
     }
 
+    /** Priorité proposée par l'IA ; repli sur la catégorie si la valeur reçue est inconnue. */
+    private Priorite prioriteDe(String valeurIA, Integer prioriteBase) {
+        try {
+            return Priorite.valueOf(valeurIA);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            log.warn("Priorité IA inattendue « {} » : priorité de secours utilisée.", valeurIA);
+            return determinerPriorite(0.5, prioriteBase);
+        }
+    }
+
+    /** Confiance minimale de l'incident reconnu pour signaler une erreur de catégorie. */
+    private static final double SEUIL_CATEGORIE = 0.6;
+
+    /**
+     * Catégorie suggérée par l'IA quand elle diffère de celle choisie par le citoyen, sinon null.
+     * Ne signale rien si l'admin n'a pas relié la catégorie choisie à une famille IA
+     * (page Catégories), ni si l'IA n'est pas assez sûre de l'incident reconnu.
+     */
+    private CategorieReclamation categorieSuggeree(CategorieReclamation choisie, ServiceIAClient.ResultatAnalyse a) {
+        String famille = a.familleSuggeree();
+        if (famille == null || a.confianceFamille() < SEUIL_CATEGORIE
+                || choisie.listeFamillesIA().isEmpty() || choisie.couvreFamille(famille)) {
+            return null;
+        }
+        // Parmi les catégories qui couvrent cette famille, on préfère la plus spécialisée
+        // (celle qui couvre le moins de familles) : « Eau » plutôt qu'une catégorie fourre-tout.
+        return categorieRepository.findAll().stream()
+                .filter(c -> c.couvreFamille(famille))
+                .min(Comparator.comparingInt(c -> c.listeFamillesIA().size()))
+                .orElse(null);
+    }
+
+    /** Priorité de SECOURS, utilisée seulement si le service IA est injoignable. */
     private Priorite determinerPriorite(Double score, Integer prioriteBase) {
         // Si le score IA est très haut ou si la catégorie est prioritaire par défaut
         if (score > 0.8 || (prioriteBase != null && prioriteBase > 3)) {
@@ -360,6 +472,9 @@ public class ReclamationService {
             );
         }
 
+        // Les doublons confirmés suivent la réclamation d'origine (résolue, rejetée ou fermée).
+        doublonIAService.propagerStatut(reclamationSauvee, nouveauStatut, motif);
+
         return reclamationSauvee;
     }
     // Appelée par : GET /api/admin/reclamations/par-statut?statut=EN_COURS
@@ -383,6 +498,37 @@ public class ReclamationService {
                 .sorted(Comparator.comparingDouble(Reclamation::getScoreUrgence).reversed())
                 .collect(Collectors.toList());
     }
+    /**
+     * Après un changement de catégorie : affecte la réclamation à un agent du service de la NOUVELLE
+     * catégorie (le moins chargé). Renvoie le nouvel agent, ou null si aucun agent n'a pu être affecté.
+     */
+    @Transactional
+    public Utilisateur reaffecterSelonCategorie(Reclamation reclamation) {
+        Utilisateur avant = dernierAgent(reclamation);
+        assignerAutomatiquement(reclamation, reclamation.getCategorie());
+        Utilisateur apres = dernierAgent(reclamation);
+        boolean change = apres != null && (avant == null || !apres.getId().equals(avant.getId()));
+        return change ? apres : null;
+    }
+
+    private Utilisateur dernierAgent(Reclamation r) {
+        List<Affectation> a = affectationRepository.findByReclamationIdOrderByDateAffectationDesc(r.getId());
+        return a.isEmpty() ? null : a.get(0).getAgent();
+    }
+
+    /**
+     * L'affectation automatique a échoué : sans cela, la réclamation restait « Ouverte »
+     * sans que personne ne le sache. Les administrateurs sont prévenus, avec la raison.
+     */
+    private void signalerAffectationManuelle(Reclamation reclamation, String raison) {
+        for (Utilisateur admin : utilisateurRepository.findByRole(Role.ADMIN)) {
+            notificationService.creer(admin, "Affectation manuelle nécessaire",
+                    "La réclamation " + reclamation.getReference() + " n'a pas pu être affectée automatiquement : "
+                            + raison + ". Affectez-la à un agent.",
+                    reclamation.getId());
+        }
+    }
+
     @Transactional
     private void assignerAutomatiquement(Reclamation reclamation,
                                          CategorieReclamation categorie) {
@@ -393,11 +539,14 @@ public class ReclamationService {
             if (service == null) {
                 System.out.println("[AUTO-ASSIGN] Aucun service responsable " +
                         "pour la catégorie : " + categorie.getNom());
+                signalerAffectationManuelle(reclamation, "la catégorie « " + categorie.getNom()
+                        + " » n'est liée à aucun service");
                 return;
             }
 
             if (!service.getActif()) {
                 System.out.println("[AUTO-ASSIGN] Service inactif : " + service.getNom());
+                signalerAffectationManuelle(reclamation, "le service « " + service.getNom() + " » est désactivé");
                 return;
             }
 
@@ -407,16 +556,21 @@ public class ReclamationService {
             if (agents.isEmpty()) {
                 System.out.println("[AUTO-ASSIGN] Aucun agent disponible " +
                         "dans le service : " + service.getNom());
+                signalerAffectationManuelle(reclamation, "aucun agent actif dans le service « "
+                        + service.getNom() + " »");
                 return;
             }
 
+            // Agent le moins chargé : dossiers non clos dont il est le responsable ACTUEL
+            // (ouverts + en cours, sans compter les dossiers transférés à un collègue).
+            // À égalité : celui qui a reçu le moins de dossiers au total, puis le plus ancien compte.
+            java.util.Set<StatutReclamation> clos = java.util.EnumSet.of(StatutReclamation.RESOLUE,
+                    StatutReclamation.REJETEE, StatutReclamation.FERMEE, StatutReclamation.ANNULEE);
             Utilisateur agentMoinsCharge = agents.stream()
-                    .min(Comparator.comparingLong(agent ->
-                            reclamationRepository.countAffectationsParStatut(
-                                    agent.getId(),
-                                    StatutReclamation.EN_COURS
-                            )
-                    ))
+                    .min(Comparator.<Utilisateur>comparingLong(agent ->
+                                    affectationRepository.countDossiersActifs(agent.getId(), clos))
+                            .thenComparingLong(agent -> affectationRepository.countByAgentId(agent.getId()))
+                            .thenComparing(Utilisateur::getId))
                     .orElse(null);
 
             if (agentMoinsCharge == null) return;

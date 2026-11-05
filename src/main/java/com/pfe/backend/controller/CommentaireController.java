@@ -23,7 +23,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/reclamations/{reclamationId}/commentaires")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class CommentaireController {
 
     private final CommentaireService commentaireService;

@@ -17,6 +17,18 @@ public interface ReclamationRepository extends JpaRepository<Reclamation, Long> 
 
     // Statistiques publiques (accueil visiteur)
     long countByStatut(StatutReclamation statut);
+
+    // Human-in-the-Loop : réclamations signalées comme doublon potentiel par l'IA
+    List<Reclamation> findByEstDoublonTrueOrderByDateCreationDesc();
+
+    // Doublons confirmés rattachés à une réclamation d'origine
+    List<Reclamation> findByDoublonDe_Id(Long origineId);
+
+    /** Réclamations dont le périmètre municipal doit être vérifié par un humain. */
+    List<Reclamation> findByPerimetreAVerifierTrueOrderByDateCreationDesc();
+
+    /** Réclamations dont la catégorie choisie par le citoyen ne correspond pas au texte, selon l'IA. */
+    List<Reclamation> findByCategorieAVerifierTrueOrderByDateCreationDesc();
     List<Reclamation> findByCitoyenId(Long id);
     // Variante paginee, utilisee par l'app mobile pour "Mes réclamations"
     // (évite de tout charger d'un coup si un citoyen en a beaucoup).
@@ -78,6 +90,26 @@ public interface ReclamationRepository extends JpaRepository<Reclamation, Long> 
             @Param("zoneId") Long zoneId,
             @Param("categorieId") Long categorieId,
             @Param("statut") StatutReclamation statut,
+            Pageable pageable);
+
+    /**
+     * Candidats à la détection de doublons (IA, étape 6) : réclamations encore ouvertes ou en cours,
+     * déposées depuis `depuis`, dans un carré autour du point (filtre grossier ; le service IA
+     * calcule ensuite la vraie distance et la similarité du texte).
+     */
+    @Query("""
+        SELECT r FROM Reclamation r
+        WHERE r.statut IN :statuts
+          AND r.dateCreation >= :depuis
+          AND r.localisation.latitude BETWEEN :latMin AND :latMax
+          AND r.localisation.longitude BETWEEN :lonMin AND :lonMax
+        ORDER BY r.dateCreation DESC
+    """)
+    List<Reclamation> findCandidatsDoublon(
+            @Param("statuts") List<StatutReclamation> statuts,
+            @Param("depuis") java.time.LocalDateTime depuis,
+            @Param("latMin") Double latMin, @Param("latMax") Double latMax,
+            @Param("lonMin") Double lonMin, @Param("lonMax") Double lonMax,
             Pageable pageable);
 
 }

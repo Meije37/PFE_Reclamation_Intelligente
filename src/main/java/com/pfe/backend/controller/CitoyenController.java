@@ -41,6 +41,7 @@ public class CitoyenController {
     private final MediaRepository mediaRepository;
     private final StorageService storageService;
     private final VoteService voteService;
+    private final com.pfe.backend.service.EvaluationService evaluationService;
 
     @GetMapping("/stats")
     public ResponseEntity<Map<String, Long>> getStats(Authentication authentication) {
@@ -117,6 +118,30 @@ public class CitoyenController {
     public ResponseEntity<Reclamation> getDétails(@PathVariable Long id, Authentication authentication) {
         return ResponseEntity.ok(reclamationService.getReclamationDetaillee(id, authentication.getName()));
     }
+    // ── Étape 8 : avis du citoyen après résolution ───────────────────────
+
+    /** GET /api/citoyen/reclamations/{id}/evaluation → {note, commentaire, dateEvaluation} ou 204 si pas encore d'avis. */
+    @GetMapping("/reclamations/{id}/evaluation")
+    public ResponseEntity<Map<String, Object>> getEvaluation(@PathVariable Long id, Authentication authentication) {
+        return evaluationService.getEvaluation(id, authentication.getName())
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /** POST /api/citoyen/reclamations/{id}/evaluation  { "note": 4, "commentaire": "…" } */
+    @PostMapping("/reclamations/{id}/evaluation")
+    public ResponseEntity<Map<String, Object>> evaluer(@PathVariable Long id,
+                                                       @RequestBody Map<String, Object> corps,
+                                                       Authentication authentication) {
+        Object note = corps.get("note");
+        if (!(note instanceof Number n) || n.doubleValue() != Math.rint(n.doubleValue())) {
+            return ResponseEntity.badRequest().body(Map.of("message", "La note doit être un nombre entier de 1 à 5."));
+        }
+        Object commentaire = corps.get("commentaire");
+        return ResponseEntity.ok(evaluationService.evaluer(id, authentication.getName(), n.intValue(),
+                commentaire != null ? commentaire.toString() : null));
+    }
+
     @PutMapping("/reclamations/{id}/annuler")
     public ResponseEntity<Void> annuler(@PathVariable Long id, Authentication authentication) {
         reclamationService.annulerReclamation(id, authentication.getName());

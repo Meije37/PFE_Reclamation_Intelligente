@@ -38,7 +38,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/public")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class CategoriePublicController {
 
     private final CategorieReclamationRepository categorieRepository;
@@ -64,6 +63,7 @@ public class CategoriePublicController {
                     dto.put("nom",               c.getNom());
                     dto.put("description",       c.getDescription());
                     dto.put("prioriteParDefaut", c.getPrioriteParDefaut());
+                    dto.put("famillesIA",        c.listeFamillesIA());
                     return dto;
                 })
                 .toList();
